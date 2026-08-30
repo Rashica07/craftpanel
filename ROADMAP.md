@@ -158,9 +158,13 @@ done, `·` = not started.
   `paper-global.yml` / `bukkit.yml` / `spigot.yml` still ·.
 - **Mods** ✓ — enable/disable (`mods/` ↔ `mods-disabled/`), import, soft-remove
   to `.craftpanel-trash/`, Fabric-API + offline-auth-mod detection.
-- **In-app Modrinth browser** · — search mods/plugins/datapacks, filter by
-  loader + MC version, one-click install, **dependency resolution** ("needs
-  these 3 → install all"), update-available flags. Manual import stays.
+- **In-app Modrinth browser** ✓ (2026-08-30) — `modrinth.rs`: search
+  mods/plugins/datapacks filtered by loader + MC version; **install with
+  required-dependency resolution** (BFS over `dependencies`, sha1-verified),
+  routed to `mods/` / `plugins/` / `world/datapacks/`; tracked in
+  `.craftpanel-modrinth.json` for update-check + one-click update + remove.
+  "Browse" tab. Verified live (REI → auto-pulled Fabric API + Cloth Config +
+  Architectury). **TODO:** one-click `.mrpack` modpack install.
 - **File manager** ✓ (2026-08-30) — `files.rs`: browse / view / edit / rename /
   mkdir / upload / download; deletes move to `.craftpanel-trash/`; path-escape
   rejected; 2 MB text cap. Files tab. Plus a **Log-file view** (tail
