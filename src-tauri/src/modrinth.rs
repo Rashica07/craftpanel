@@ -30,6 +30,10 @@ pub struct Hit {
     pub categories: Vec<String>,
     /// already installed by us
     pub installed: bool,
+    /// has a build for this server's Minecraft version
+    pub compatible: bool,
+    /// "required" | "optional" | "unsupported" | "unknown"
+    pub server_side: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +91,11 @@ struct RawHit {
     project_type: String,
     #[serde(default)]
     categories: Vec<String>,
+    /// all game versions any release of this project supports
+    #[serde(default)]
+    versions: Vec<String>,
+    #[serde(default)]
+    server_side: Option<String>,
 }
 #[derive(Deserialize)]
 struct RawVersion {
@@ -183,23 +192,24 @@ pub fn search(
     mc_version: Option<&str>,
     offset: u32,
 ) -> Result<SearchResult, String> {
-    let mut facets: Vec<String> = vec![format!("[\"project_type:{project_type}\"]")];
     let lf = loader_facet(server_type);
+    let mut facets: Vec<String> = vec![format!("[\"project_type:{project_type}\"]")];
     if project_type != "datapack" {
         facets.push(format!("[\"categories:{lf}\"]"));
+        // server-usable only — drop client-only mods (minimaps, Iris, …)
+        facets.push("[\"server_side:required\",\"server_side:optional\"]".to_string());
     }
-    if let Some(v) = mc_version {
-        facets.push(format!("[\"versions:{v}\"]"));
-    }
+    // NB: no `versions:` facet — we show everything and *mark* what has no build
+    // for this server's MC version, so nothing silently disappears.
     let facets = format!("[{}]", facets.join(","));
 
     let raw: RawSearch = ureq::get(&format!("{API}/search"))
         .set("User-Agent", UA)
         .query("query", query)
         .query("facets", &facets)
-        .query("limit", "20")
+        .query("limit", "30")
         .query("offset", &offset.to_string())
-        .query("index", "relevance")
+        .query("index", if query.is_empty() { "downloads" } else { "relevance" })
         .timeout(std::time::Duration::from_secs(20))
         .call()
         .map_err(|e| format!("search failed: {e}"))?
@@ -211,13 +221,18 @@ pub fn search(
         .map(|e| e.project_id)
         .collect();
 
-    Ok(SearchResult {
-        total: raw.total_hits,
-        hits: raw
-            .hits
-            .into_iter()
-            .map(|h| Hit {
+    let mut hits: Vec<Hit> = raw
+        .hits
+        .into_iter()
+        .map(|h| {
+            let compatible = match mc_version {
+                Some(v) => h.versions.iter().any(|x| x == v),
+                None => true,
+            };
+            Hit {
                 installed: mine.contains(&h.project_id),
+                compatible,
+                server_side: h.server_side.unwrap_or_else(|| "unknown".into()),
                 project_id: h.project_id,
                 slug: h.slug,
                 title: h.title,
@@ -226,9 +241,13 @@ pub fn search(
                 icon_url: h.icon_url,
                 project_type: h.project_type,
                 categories: h.categories,
-            })
-            .collect(),
-    })
+            }
+        })
+        .collect();
+    // compatible first, keeping relevance order within each group
+    hits.sort_by_key(|h| !h.compatible);
+
+    Ok(SearchResult { total: raw.total_hits, hits })
 }
 
 // --- install (with required-dep resolution) -----------------------------
@@ -485,6 +504,23 @@ mod tests {
     fn live_search_fabric() {
         let r = search("/tmp", ServerType::Fabric, "lithium", "mod", Some("1.21.1"), 0).unwrap();
         assert!(r.hits.iter().any(|h| h.slug == "lithium"));
+    }
+
+    #[test]
+    #[ignore]
+    fn live_search_excludes_client_only_and_marks_old() {
+        // Sodium is client-only -> must NOT appear in a server search
+        let r = search("/tmp", ServerType::Fabric, "sodium", "mod", Some("1.21.1"), 0).unwrap();
+        assert!(!r.hits.iter().any(|h| h.slug == "sodium"), "sodium is client-only");
+        for h in &r.hits {
+            assert_ne!(h.server_side, "unsupported");
+        }
+        // a very old MC version -> current mods have no build, must be marked
+        let old = search("/tmp", ServerType::Fabric, "lithium", "mod", Some("1.7.10"), 0).unwrap();
+        if let Some(l) = old.hits.iter().find(|h| h.slug == "lithium") {
+            assert!(!l.compatible, "lithium has no 1.7.10 build");
+        }
+        println!("{} hits, {} incompatible", r.hits.len(), r.hits.iter().filter(|h| !h.compatible).count());
     }
 
     #[test]

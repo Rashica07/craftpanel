@@ -3,12 +3,15 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdminLists,
+  AntiCheatAdvice,
   ApplyResult,
   Backup,
   BackupsConfig,
   CloudStatus,
   CrashReport,
   CreateSpec,
+  MgmtStatus,
+  Suspicion,
   DetectionResult,
   ExternalStatus,
   FileView,
@@ -331,6 +334,23 @@ export const api = {
   },
   modrinthRemove(id: string, projectId: string): Promise<void> {
     return invoke("modrinth_remove", { id, projectId });
+  },
+
+  // Stage 9 — anti-cheat + management API
+  anticheatAdvice(id: string): Promise<AntiCheatAdvice> {
+    return invoke("anticheat_advice", { id });
+  },
+  anticheatSuspicion(id: string): Promise<Suspicion[]> {
+    return invoke("anticheat_suspicion", { id });
+  },
+  mgmtStatus(id: string): Promise<MgmtStatus> {
+    return invoke("mgmt_status", { id });
+  },
+  mgmtEnable(id: string): Promise<MgmtStatus> {
+    return invoke("mgmt_enable", { id });
+  },
+  mgmtDisable(id: string): Promise<void> {
+    return invoke("mgmt_disable", { id });
   },
 
   // branding + worlds

@@ -194,6 +194,8 @@ export interface ModrinthHit {
   projectType: string;
   categories: string[];
   installed: boolean;
+  compatible: boolean;
+  serverSide: string;
 }
 
 export interface ModrinthSearch {
@@ -220,6 +222,37 @@ export interface ModrinthInstalled {
 export interface ModrinthInstallResult {
   installed: string[];
   skipped: string[];
+}
+
+export interface AntiCheatRecommendation {
+  name: string;
+  slug: string;
+  blurb: string;
+}
+
+export interface AntiCheatAdvice {
+  installed: string[];
+  recommended: AntiCheatRecommendation[];
+  public: boolean;
+  warn: boolean;
+  supported: boolean;
+}
+
+export interface Suspicion {
+  name: string;
+  flags: number;
+  rejoins: number;
+  samples: string[];
+}
+
+export interface MgmtStatus {
+  supported: boolean;
+  enabled: boolean;
+  host: string;
+  port: number;
+  tls: boolean;
+  secretSet: boolean;
+  reachable: boolean;
 }
 
 export interface PerfSample {

@@ -148,15 +148,21 @@ export function BrowsePanel({
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-medium">{h.title}</span>
+                <span className={`truncate text-sm font-medium ${!h.compatible ? "text-ink-faint" : ""}`}>
+                  {h.title}
+                </span>
                 <span className="text-[10px] text-ink-faint">↓ {num(h.downloads)}</span>
+                {!h.compatible && <Badge tone="warn">no build for your version</Badge>}
+                {h.serverSide === "optional" && h.compatible && (
+                  <span className="text-[10px] text-ink-faint">client-optional</span>
+                )}
               </div>
               <p className="line-clamp-2 text-[11px] leading-snug text-ink-faint">{h.description}</p>
             </div>
             <div className="shrink-0 self-center">
               {h.installed ? (
                 <Badge tone="ok">installed</Badge>
-              ) : (
+              ) : h.compatible ? (
                 <Button
                   variant="subtle"
                   disabled={!!busy}
@@ -164,6 +170,8 @@ export function BrowsePanel({
                 >
                   {busy === h.projectId ? "…" : "Install"}
                 </Button>
+              ) : (
+                <span className="text-[10px] text-ink-faint">—</span>
               )}
             </div>
           </div>

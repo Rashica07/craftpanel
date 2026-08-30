@@ -3,8 +3,10 @@
 //! Blocking TCP with timeouts. One [`RconClient`] per connection; the process
 //! layer keeps a lazily-(re)connected client per server.
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Mutex;
 use std::time::Duration;
 
 const TYPE_AUTH: i32 = 3;
@@ -165,6 +167,51 @@ struct Packet {
     id: i32,
     ptype: i32,
     body: String,
+}
+
+/// Keeps one authenticated connection per server and reuses it, so polling
+/// (players, TPS, RAM) doesn't reconnect every few seconds. Reconnects on error.
+pub struct RconPool(Mutex<HashMap<String, RconClient>>);
+
+impl Default for RconPool {
+    fn default() -> Self {
+        RconPool(Mutex::new(HashMap::new()))
+    }
+}
+
+impl RconPool {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Run `f` against the pooled connection for `key`; on any error, drop it
+    /// and retry once on a fresh connection.
+    pub fn run<T>(
+        &self,
+        key: &str,
+        host: &str,
+        port: u16,
+        password: &str,
+        f: impl Fn(&mut RconClient) -> Result<T>,
+    ) -> Result<T> {
+        let mut map = self.0.lock().unwrap();
+        if let Some(c) = map.get_mut(key) {
+            match f(c) {
+                Ok(v) => return Ok(v),
+                Err(_) => {
+                    map.remove(key);
+                }
+            }
+        }
+        let mut c = RconClient::connect((host, port), password)?;
+        let v = f(&mut c)?;
+        map.insert(key.to_string(), c);
+        Ok(v)
+    }
+
+    pub fn drop_conn(&self, key: &str) {
+        self.0.lock().unwrap().remove(key);
+    }
 }
 
 // --- higher-level helpers the commands layer uses -------------------------

@@ -1,6 +1,7 @@
 mod adapter;
 mod admin;
 mod analytics;
+mod anticheat;
 mod backups;
 mod branding;
 mod cloud;
@@ -10,6 +11,7 @@ mod db;
 mod external;
 mod files;
 mod java;
+mod mgmt;
 mod minecraft;
 mod modrinth;
 mod mods;
@@ -40,6 +42,7 @@ use tauri::{
 use cloud::CloudManager;
 use db::Db;
 use process::ProcessManager;
+use rcon::RconPool;
 use tunnel::TunnelManager;
 
 /// Stable per-device id, exposed to commands.
@@ -93,6 +96,7 @@ pub fn run() {
             app.manage(procs);
             app.manage(cloud);
             app.manage(tunnel);
+            app.manage(RconPool::new());
 
             // automation engine (auto-restart, daily restart, timed commands)
             let offset = time::OffsetDateTime::now_local()
@@ -234,6 +238,11 @@ pub fn run() {
             commands::modrinth_check_updates,
             commands::modrinth_update,
             commands::modrinth_remove,
+            commands::anticheat_advice,
+            commands::anticheat_suspicion,
+            commands::mgmt_status,
+            commands::mgmt_enable,
+            commands::mgmt_disable,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,

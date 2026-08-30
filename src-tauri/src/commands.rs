@@ -9,6 +9,8 @@ use tauri::{Emitter, State};
 use crate::adapter::ServerType;
 use crate::admin::{self, AdminLists};
 use crate::analytics::{self, PlayerStat};
+use crate::anticheat::{self, Advice, Suspicion};
+use crate::mgmt::{self, MgmtStatus};
 use crate::backups::{self, Backup};
 use crate::branding;
 use crate::crashreports::{self, CrashReport};
@@ -27,7 +29,7 @@ use crate::mods::{self, ModList};
 use crate::process::{LogLine, ProcSnapshot, ProcessManager};
 use crate::properties::Properties;
 use crate::provision::{self, CreateSpec, Loader, VersionInfo};
-use crate::rcon::{self, RconClient};
+use crate::rcon::{self, RconClient, RconPool};
 use crate::cloud::CloudManager;
 use crate::r2::R2Config;
 use crate::settings::{self, ServerSettings};
@@ -217,7 +219,12 @@ pub fn start_server(
 }
 
 #[tauri::command]
-pub fn stop_server(procs: State<ProcessManager>, id: String) -> Result<(), String> {
+pub fn stop_server(
+    procs: State<ProcessManager>,
+    pool: State<RconPool>,
+    id: String,
+) -> Result<(), String> {
+    pool.drop_conn(&id);
     procs.stop(&id)
 }
 
@@ -269,7 +276,12 @@ pub fn stop_on_port(db: State<Db>, procs: State<ProcessManager>, id: String) -> 
 }
 
 #[tauri::command]
-pub fn kill_server(procs: State<ProcessManager>, id: String) -> Result<(), String> {
+pub fn kill_server(
+    procs: State<ProcessManager>,
+    pool: State<RconPool>,
+    id: String,
+) -> Result<(), String> {
+    pool.drop_conn(&id);
     procs.kill(&id)
 }
 
@@ -376,9 +388,22 @@ fn rcon_endpoint(rec: &ServerRecord) -> Result<(u16, String), String> {
     Ok((port, password))
 }
 
-fn connect_rcon(rec: &ServerRecord) -> Result<RconClient, String> {
+/// Run one RCON command through the pooled (kept-alive) connection.
+fn rcon_run(pool: &RconPool, rec: &ServerRecord, cmd: &str) -> Result<String, String> {
     let (port, password) = rcon_endpoint(rec)?;
-    RconClient::connect(("127.0.0.1", port), &password).map_err(|e| e.to_string())
+    pool.run(&rec.id, "127.0.0.1", port, &password, |c| c.command(cmd))
+        .map_err(|e| e.to_string())
+}
+
+/// Run a closure (possibly several commands) through the pooled connection.
+fn rcon_with<T>(
+    pool: &RconPool,
+    rec: &ServerRecord,
+    f: impl Fn(&mut RconClient) -> rcon::Result<T>,
+) -> Result<T, String> {
+    let (port, password) = rcon_endpoint(rec)?;
+    pool.run(&rec.id, "127.0.0.1", port, &password, f)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -439,25 +464,33 @@ pub fn rcon_setup(
 }
 
 #[tauri::command]
-pub fn rcon_players(db: State<Db>, id: String) -> Result<PlayerList, String> {
+pub fn rcon_players(
+    db: State<Db>,
+    pool: State<RconPool>,
+    id: String,
+) -> Result<PlayerList, String> {
     let rec = load(&db, &id)?;
-    let mut client = connect_rcon(&rec)?;
-    let out = client.command("list").map_err(|e| e.to_string())?;
+    let out = rcon_run(&pool, &rec, "list")?;
     let (online, max, players) = rcon::parse_player_list(&out);
     Ok(PlayerList { online, max, players })
 }
 
 #[tauri::command]
-pub fn rcon_command(db: State<Db>, id: String, command: String) -> Result<String, String> {
+pub fn rcon_command(
+    db: State<Db>,
+    pool: State<RconPool>,
+    id: String,
+    command: String,
+) -> Result<String, String> {
     let rec = load(&db, &id)?;
-    let mut client = connect_rcon(&rec)?;
-    client.command(command.trim()).map_err(|e| e.to_string())
+    rcon_run(&pool, &rec, command.trim())
 }
 
 /// Typed, validated player operations — all keyed on username (offline-safe).
 #[tauri::command]
 pub fn rcon_player_action(
     db: State<Db>,
+    pool: State<RconPool>,
     id: String,
     action: String,
     player: String,
@@ -491,8 +524,7 @@ pub fn rcon_player_action(
         }
         other => return Err(format!("Unknown action: {other}")),
     };
-    let mut client = connect_rcon(&rec)?;
-    client.command(&cmd).map_err(|e| e.to_string())
+    rcon_run(&pool, &rec, &cmd)
 }
 
 fn safe_reason_char(c: char) -> bool {
@@ -1032,6 +1064,7 @@ pub fn set_schedule(db: State<Db>, id: String, schedule: Schedule) -> Result<(),
 pub fn server_perf(
     db: State<Db>,
     procs: State<ProcessManager>,
+    pool: State<RconPool>,
     id: String,
 ) -> Result<PerfSample, String> {
     let rec = load(&db, &id)?;
@@ -1048,8 +1081,9 @@ pub fn server_perf(
     }
 
     if procs.is_running(&id) || external::probe(&rec.path).looks_running() {
-        if let Ok(mut c) = connect_rcon(&rec) {
-            let (tps, mspt, src) = perf::tps_over_rcon(&mut c);
+        if let Ok((tps, mspt, src)) =
+            rcon_with(&pool, &rec, |c| Ok(perf::tps_over_rcon(c)))
+        {
             s.tps = tps;
             s.mspt = mspt;
             s.source = src;
@@ -1180,6 +1214,53 @@ pub fn modrinth_update(db: State<Db>, id: String, project_id: String) -> Result<
 pub fn modrinth_remove(db: State<Db>, id: String, project_id: String) -> Result<(), String> {
     let rec = load(&db, &id)?;
     modrinth::remove_one(&rec.path, rec.server_type, &project_id)
+}
+
+// --- Stage 9: anti-cheat + management API ---------------------------------
+
+#[tauri::command]
+pub fn anticheat_advice(db: State<Db>, id: String) -> Result<Advice, String> {
+    let rec = load(&db, &id)?;
+    // "public" = the server is being shared to the internet via a tunnel
+    let shared = db
+        .get_setting(&format!("tunnel.{id}"))
+        .ok()
+        .flatten()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    Ok(anticheat::advise(&rec.path, rec.server_type, shared))
+}
+
+#[tauri::command]
+pub fn anticheat_suspicion(db: State<Db>, id: String) -> Result<Vec<Suspicion>, String> {
+    let rec = load(&db, &id)?;
+    Ok(anticheat::suspicion(&rec.path))
+}
+
+#[tauri::command]
+pub fn mgmt_status(db: State<Db>, id: String) -> Result<MgmtStatus, String> {
+    let rec = load(&db, &id)?;
+    Ok(mgmt::status(&rec.path, rec.mc_version.as_deref()))
+}
+
+#[tauri::command]
+pub fn mgmt_enable(
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+) -> Result<MgmtStatus, String> {
+    let rec = load(&db, &id)?;
+    let running = procs.is_running(&id) || external::probe(&rec.path).looks_running();
+    let port = crate::external::port_of(std::path::Path::new(&rec.path)).wrapping_add(20);
+    let st = mgmt::enable(&rec.path, if port == 0 { 25585 } else { port })?;
+    let _ = running;
+    Ok(st)
+}
+
+#[tauri::command]
+pub fn mgmt_disable(db: State<Db>, id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    mgmt::disable(&rec.path)
 }
 
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------

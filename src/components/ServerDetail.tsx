@@ -23,6 +23,7 @@ import { WorldsPanel } from "./WorldsPanel";
 import { BrowsePanel } from "./BrowsePanel";
 import { NetworkPanel } from "./NetworkPanel";
 import { PlayerHistory } from "./PlayerHistory";
+import { SecuritySection } from "./SecuritySection";
 import { HealthStrip } from "./HealthStrip";
 import { Icon } from "./Icon";
 import { cloudLeaseLabel, leaseLabel } from "./ShareSection";
@@ -473,6 +474,7 @@ export function ServerDetail({
               onNeedsRestart={() => setPendingRestart(true)}
             />
             <PlayerHistory serverId={server.id} />
+            <SecuritySection serverId={server.id} />
           </div>
         )}
         {tab === "settings" && (
