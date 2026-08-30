@@ -4,7 +4,9 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdminLists,
   AntiCheatAdvice,
+  AppSettings,
   ApplyResult,
+  UpdateCheck,
   Backup,
   BackupsConfig,
   CloudStatus,
@@ -351,6 +353,17 @@ export const api = {
   },
   mgmtDisable(id: string): Promise<void> {
     return invoke("mgmt_disable", { id });
+  },
+
+  // Stage 10 — app settings + updates
+  appSettingsGet(): Promise<AppSettings> {
+    return invoke("app_settings_get");
+  },
+  appSettingsSet(settings: AppSettings): Promise<void> {
+    return invoke("app_settings_set", { settings });
+  },
+  checkUpdate(): Promise<UpdateCheck> {
+    return invoke("check_update");
   },
 
   // branding + worlds

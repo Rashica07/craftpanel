@@ -3,6 +3,7 @@ import { api } from "./api";
 import { AddServerModal } from "./components/AddServerModal";
 import { CreateServerModal } from "./components/CreateServerModal";
 import { JoinSharedModal } from "./components/JoinSharedModal";
+import { AppSettingsModal } from "./components/AppSettingsModal";
 import { ServerDetail } from "./components/ServerDetail";
 import { SERVER_TYPE_META, STATUS_META, type ServerRecord } from "./types";
 import { Badge, Button } from "./components/ui";
@@ -15,6 +16,7 @@ export default function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(true);
   const runtimes = useRuntimes();
 
@@ -36,8 +38,16 @@ export default function App() {
   return (
     <div className="flex h-full">
       <aside className="flex w-64 shrink-0 flex-col border-r border-edge bg-panel">
-        <div className="flex items-center border-b border-edge px-4 py-3">
+        <div className="flex items-center gap-2 border-b border-edge-soft px-4 py-3">
           <img src="/wordmark-light.png" className="h-6 w-auto" alt="CraftPanel" />
+          <span className="flex-1" />
+          <button
+            onClick={() => setShowSettings(true)}
+            title="CraftPanel settings"
+            className="text-ink-faint transition-colors hover:text-ink"
+          >
+            <Icon name="gear" size={16} />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
@@ -113,7 +123,7 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-hidden bg-[#0f1013]">
+      <main className="flex-1 overflow-hidden bg-bg">
         {selected ? (
           <ServerDetail
             key={selected.id}
@@ -122,28 +132,50 @@ export default function App() {
             onServersChanged={refresh}
           />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <img src="/wordmark-light.png" className="h-12 w-auto" alt="CraftPanel" />
-            <p className="max-w-sm text-sm text-ink-dim">
-              Create a new Minecraft server — Vanilla, Paper, Fabric, Forge or
-              NeoForge — or add a server folder you already have.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="primary"
-                className="flex items-center gap-1.5"
-                onClick={() => setShowCreate(true)}
-              >
-                <Icon name="wand" size={15} /> Create server
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center gap-1.5"
-                onClick={() => setShowAdd(true)}
-              >
-                <Icon name="plus" size={14} /> Add existing
-              </Button>
-            </div>
+          <div className="cp-in mx-auto flex h-full max-w-md flex-col items-center justify-center gap-5 text-center">
+            <img src="/wordmark-light.png" className="h-11 w-auto" alt="CraftPanel" />
+            {loading ? (
+              <p className="text-sm text-ink-faint">Loading…</p>
+            ) : (
+              <>
+                <p className="text-sm leading-relaxed text-ink-dim">
+                  Run your own Minecraft server, the easy way. Pick a type, pick a
+                  version, and CraftPanel downloads it, sets it up and gets you a
+                  join address — no config files, no port-forwarding.
+                </p>
+                <div className="grid w-full grid-cols-3 gap-2 text-[11px] text-ink-faint">
+                  {[
+                    ["wand", "1. Create"],
+                    ["play", "2. Start"],
+                    ["signal", "3. Share"],
+                  ].map(([ic, t]) => (
+                    <div
+                      key={t}
+                      className="rounded-lg border border-edge-soft bg-panel px-2 py-3"
+                    >
+                      <Icon name={ic} size={16} className="mx-auto mb-1 text-accent" />
+                      {t}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    className="flex items-center gap-1.5"
+                    onClick={() => setShowCreate(true)}
+                  >
+                    <Icon name="wand" size={15} /> Create your first server
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="flex items-center gap-1.5"
+                    onClick={() => setShowAdd(true)}
+                  >
+                    <Icon name="plus" size={14} /> Add existing
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -178,6 +210,7 @@ export default function App() {
           }}
         />
       )}
+      {showSettings && <AppSettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

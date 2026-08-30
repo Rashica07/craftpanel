@@ -1,21 +1,32 @@
 @import "tailwindcss";
 
 @theme {
+  /* --- orange accent --- */
   --color-accent: #ff8c00;
-  --color-accent-hover: #ff9e2c;
-  --color-accent-muted: #3a2a12;
+  --color-accent-hover: #ffa236;
+  --color-accent-press: #e67e00;
+  --color-accent-muted: #2a1c0c;
+  --color-accent-ring: #ff8c0055;
 
-  --color-panel: #17181c;
-  --color-panel-2: #1e2025;
-  --color-panel-3: #26282f;
-  --color-edge: #2f323a;
-  --color-ink: #e8e9ec;
-  --color-ink-dim: #9aa0aa;
-  --color-ink-faint: #6b7280;
+  /* --- warm dark surfaces (bottom → top) --- */
+  --color-bg: #0b0c0e;
+  --color-panel: #141519;
+  --color-panel-2: #1c1e23;
+  --color-panel-3: #24262d;
+  --color-edge: #33363f;
+  --color-edge-soft: #2a2d34;
 
-  --color-ok: #3fb950;
-  --color-warn: #d29922;
-  --color-bad: #f85149;
+  --color-ink: #eceef1;
+  --color-ink-dim: #a3a9b4;
+  --color-ink-faint: #6c7280;
+
+  --color-ok: #46c25a;
+  --color-warn: #e0a53a;
+  --color-bad: #f0564d;
+
+  --radius-sm: 4px;
+  --radius: 7px;
+  --radius-lg: 11px;
 }
 
 html,
@@ -26,11 +37,39 @@ body,
 
 body {
   margin: 0;
-  background: #0f1013;
   color: var(--color-ink);
+  background-color: var(--color-bg);
+  /* a very faint warm vignette so the flat dark has some depth */
+  background-image:
+    radial-gradient(1200px 600px at 12% -10%, #ff8c000a, transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, #ffffff05, transparent 55%);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.01em;
+}
+
+/* headings get a subtle blocky feel via weight + tight tracking */
+.display {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* MC-flavoured button bevel */
+.btn-bevel {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.35);
+}
+.btn-bevel:active:not(:disabled) {
+  border-bottom-width: 1px;
+  transform: translateY(1px);
 }
 
 /* thin dark scrollbars */
@@ -45,4 +84,27 @@ body {
 *::-webkit-scrollbar-thumb {
   background: var(--color-edge);
   border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #414550;
+}
+
+/* focus ring */
+*:focus-visible {
+  outline: 2px solid var(--color-accent-ring);
+  outline-offset: 1px;
+}
+
+@keyframes cp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cp-in {
+  animation: cp-fade-in 0.18s ease-out;
 }

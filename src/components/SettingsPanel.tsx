@@ -30,6 +30,15 @@ export function SettingsPanel({
   const [error, setError] = useState<string | null>(null);
   const [ram, setRam] = useState(server.ram_mb);
   const [keepAwake, setKeepAwake] = useState(server.keep_awake);
+  const [expert, setExpert] = useState(false);
+
+  useEffect(() => {
+    api.appSettingsGet().then((s) => setExpert(s.expertMode)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!expert && view === "raw") setView("advanced");
+  }, [expert, view]);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const load = useCallback(() => {
@@ -135,7 +144,7 @@ export function SettingsPanel({
       ) : (
         <>
           <div className="flex rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
-            {(["common", "advanced", "raw"] as View[]).map((v) => (
+            {(["common", "advanced", ...(expert ? ["raw"] : [])] as View[]).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -143,7 +152,7 @@ export function SettingsPanel({
                   view === v ? "bg-accent text-black" : "text-ink-dim hover:text-ink"
                 }`}
               >
-                {v}
+                {v === "common" ? "Basics" : v === "advanced" ? "Advanced" : "Raw"}
               </button>
             ))}
           </div>

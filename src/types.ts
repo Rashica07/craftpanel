@@ -245,6 +245,23 @@ export interface Suspicion {
   samples: string[];
 }
 
+export interface AppSettings {
+  defaultJava: string;
+  defaultRamMb: number;
+  expertMode: boolean;
+  keepServersOnQuit: boolean;
+  githubRepo: string;
+}
+
+export interface UpdateCheck {
+  current: string;
+  latest: string | null;
+  newer: boolean;
+  url: string | null;
+  notes: string | null;
+  unavailable: string | null;
+}
+
 export interface MgmtStatus {
   supported: boolean;
   enabled: boolean;

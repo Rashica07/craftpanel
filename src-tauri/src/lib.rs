@@ -29,6 +29,7 @@ mod share;
 mod sync;
 mod system;
 mod tunnel;
+mod updater;
 mod worlds;
 
 use std::sync::Arc;
@@ -53,6 +54,26 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+}
+
+/// Quit: stop tunnels, and either stop servers or leave them running
+/// (the "keep servers running when I quit" pref).
+fn on_quit(app: &tauri::AppHandle) {
+    if let Some(t) = app.try_state::<std::sync::Arc<TunnelManager>>() {
+        t.stop_all();
+    }
+    let keep = app
+        .try_state::<Db>()
+        .map(|db| commands::read_app_settings(&db).keep_servers_on_quit)
+        .unwrap_or(false);
+    if let Some(pm) = app.try_state::<ProcessManager>() {
+        let dirs = server_dirs(app);
+        if keep {
+            pm.release_leases_only(&dirs);
+        } else {
+            pm.shutdown_and_release(&dirs);
+        }
     }
 }
 
@@ -119,9 +140,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
                     "quit" => {
-                        if let Some(pm) = app.try_state::<ProcessManager>() {
-                            pm.shutdown_and_release(&server_dirs(app));
-                        }
+                        on_quit(app);
                         app.exit(0);
                     }
                     _ => {}
@@ -243,6 +262,9 @@ pub fn run() {
             commands::mgmt_status,
             commands::mgmt_enable,
             commands::mgmt_disable,
+            commands::app_settings_get,
+            commands::app_settings_set,
+            commands::check_update,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,
@@ -265,12 +287,7 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app, event| {
             if let RunEvent::ExitRequested { .. } = event {
-                if let Some(t) = app.try_state::<std::sync::Arc<TunnelManager>>() {
-                    t.stop_all();
-                }
-                if let Some(pm) = app.try_state::<ProcessManager>() {
-                    pm.shutdown_and_release(&server_dirs(app));
-                }
+                on_quit(app);
             }
         });
 }

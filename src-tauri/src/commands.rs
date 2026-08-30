@@ -1263,6 +1263,51 @@ pub fn mgmt_disable(db: State<Db>, id: String) -> Result<(), String> {
     mgmt::disable(&rec.path)
 }
 
+// --- Stage 10: app settings + update check --------------------------------
+
+#[derive(Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default)]
+    pub default_java: String,
+    #[serde(default)]
+    pub default_ram_mb: u32,
+    #[serde(default)]
+    pub expert_mode: bool,
+    /// closing / quitting CraftPanel leaves running servers alive
+    #[serde(default)]
+    pub keep_servers_on_quit: bool,
+    #[serde(default)]
+    pub github_repo: String,
+}
+
+const APP_SETTINGS_KEY: &str = "app.settings";
+
+pub fn read_app_settings(db: &Db) -> AppSettings {
+    db.get_setting(APP_SETTINGS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn app_settings_get(db: State<Db>) -> AppSettings {
+    read_app_settings(&db)
+}
+
+#[tauri::command]
+pub fn app_settings_set(db: State<Db>, settings: AppSettings) -> Result<(), String> {
+    let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+    db.set_setting(APP_SETTINGS_KEY, &json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn check_update(db: State<Db>) -> crate::updater::UpdateCheck {
+    let repo = read_app_settings(&db).github_repo;
+    crate::updater::check(if repo.is_empty() { None } else { Some(&repo) })
+}
+
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------
 
 #[tauri::command]

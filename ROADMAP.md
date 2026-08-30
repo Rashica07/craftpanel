@@ -71,11 +71,15 @@ below).
    Name-keyed. "Player history" in the Players tab.
 7. **Custom / shareable address** — bundled tunnel so there's a real
    `name.xxxx` address without port-forwarding. *(Phase 5.)* — **next**
-8. **UX pass** — ~ started (2026-08-30): stroke-icon set (`Icon.tsx`) on every
-   detail tab, the sidebar buttons and Start/Stop; new app icon + in-app
-   wordmark from the user's Gemini art (`src-tauri/examples/gen_assets.rs`);
-   standard native menu bar (`Menu::default`). Still: an app-level Settings
-   screen, empty-state polish, tooltips, a monochrome menu-bar (tray) icon.
+8. **UX pass** — ~ (batch 10, 2026-08-30): design-token refresh (warmer darks,
+   richer orange, depth/vignette, MC-style button bevel, `Toggle`/`Card`
+   primitives), stroke-icons everywhere, **app-level Settings modal** (gear in
+   the sidebar — default Java/RAM, keep-servers-on-quit, expert mode, update
+   check), first-run onboarding (3-step + friendly copy), Raw
+   `server.properties` tier now gated behind **expert mode**. **Still open:**
+   a real Aternos/Bisect-grade visual pass (needs the user iterating on the
+   running app), per-field icons in Advanced settings, tooltips, a monochrome
+   tray icon, a bundled display font.
 
 ### Native look & Windows (asked 2026-08-30)
 - **"Real Swift packages / pure native feel"** — not possible inside Tauri
@@ -308,7 +312,13 @@ still `·`.
   currently no-ops there with a console note.
 - **Bedrock & cross-play** · — Bedrock server as another `ServerAdapter`
   (PowerNukkitX / BDS); one-click Geyser + Floodgate to bridge Java ↔ Bedrock.
-- **Self-update** · — Tauri updater feed.
+- **Self-update** ~ (batch 10) — `updater.rs` checks the GitHub Releases API
+  against `CARGO_PKG_VERSION` and shows "vX available →" in app Settings (repo
+  is a setting). Full signed auto-download+install via `tauri-plugin-updater`
+  needs the CI to sign artifacts + a `latest.json` feed — follow-up.
+- **"Keep servers running when I quit"** ✓ (batch 10) — app setting; `on_quit`
+  releases share leases but doesn't stop the JVMs, session files stay → next
+  launch re-adopts. (Window-close already kept them; this covers Quit.)
 
 ## Multi-device sync (the "shared server" / private-code feature)
 

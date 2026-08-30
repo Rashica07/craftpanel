@@ -547,6 +547,15 @@ impl ProcessManager {
     /// On app exit (tray → Quit): stop every server we're running — gracefully
     /// if we can, then force — drop any share leases we hold, and clear session
     /// files so the next launch starts clean.
+    /// Quit but leave running servers alive (the "keep servers running" pref).
+    /// Drop only the share leases we hold; session files stay so the next
+    /// launch re-adopts.
+    pub fn release_leases_only(&self, server_dirs: &[String]) {
+        for dir in server_dirs {
+            crate::share::release(Path::new(dir), &self.device_id);
+        }
+    }
+
     pub fn shutdown_and_release(&self, server_dirs: &[String]) {
         let children: Vec<(String, Arc<Mutex<Child>>)> = {
             let map = self.servers.lock().unwrap();
