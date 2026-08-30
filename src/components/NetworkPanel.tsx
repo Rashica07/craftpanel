@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { JoinInfo } from "../types";
+import type { JoinInfo, TunnelStatus } from "../types";
 import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
 
@@ -31,9 +31,12 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [tunnel, setTunnel] = useState("");
+  const [tun, setTun] = useState<TunnelStatus>({ running: false, address: null, error: null });
+  const [tunProgress, setTunProgress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const progressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const load = useCallback(() => {
     api
@@ -52,7 +55,30 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
     setInfo(null);
     setQr(null);
     load();
-  }, [load]);
+    api.tunnelStatus(serverId).then(setTun).catch(() => {});
+  }, [load, serverId]);
+
+  useEffect(() => {
+    let uns: Array<() => void> = [];
+    api
+      .onTunnelStatus((id, s) => {
+        if (id !== serverId) return;
+        setTun(s);
+        load(); // the tunnel address feeds "recommended"
+      })
+      .then((u) => uns.push(u));
+    api
+      .onTunnelProgress((msg) => {
+        setTunProgress(msg);
+        clearTimeout(progressTimer.current);
+        progressTimer.current = setTimeout(() => setTunProgress(null), 5000);
+      })
+      .then((u) => uns.push(u));
+    return () => {
+      uns.forEach((u) => u());
+      clearTimeout(progressTimer.current);
+    };
+  }, [serverId, load]);
 
   async function guard(fn: () => Promise<unknown>, ok?: string) {
     setBusy(true);
@@ -153,31 +179,76 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
         </div>
       )}
 
-      {/* tunnel address */}
+      {/* in-app tunnel */}
       <div className="rounded-lg border border-edge bg-panel p-3">
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-          <Icon name="signal" size={13} /> Tunnel address
+          <Icon name="signal" size={13} /> Free tunnel
         </div>
         <p className="mb-2 text-[11px] leading-snug text-ink-faint">
-          A tunnel gives you an address that works from anywhere with no port-forwarding.
-          Set one up at{" "}
+          One click, no account, no port-forwarding — gives you a{" "}
+          <code>bore.pub</code> address that works from anywhere. It's temporary:
+          the number changes if you restart the tunnel, and it runs on a shared
+          community server. For a permanent custom address, use the field below.
+        </p>
+        {tun.running ? (
+          <div className="space-y-2">
+            {tun.address ? (
+              <Copyable label="tunnel" value={tun.address} />
+            ) : (
+              <div className="text-xs text-ink-faint">Connecting…</div>
+            )}
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => guard(() => api.tunnelStop(serverId), "Tunnel stopped.")}
+            >
+              Stop tunnel
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={() => guard(() => api.tunnelStart(serverId))}
+          >
+            Start free tunnel
+          </Button>
+        )}
+        {tunProgress && (
+          <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{tunProgress}</div>
+        )}
+        {tun.error && (
+          <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+            {tun.error}
+          </div>
+        )}
+      </div>
+
+      {/* manual / permanent tunnel address */}
+      <div className="rounded-lg border border-edge bg-panel p-3">
+        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
+          Permanent address (optional)
+        </div>
+        <p className="mb-2 text-[11px] leading-snug text-ink-faint">
+          Want a stable address like <code>you.craft.playit.gg</code>? Make a free
+          tunnel at{" "}
           <a href="https://playit.gg" target="_blank" rel="noreferrer" className="text-accent underline">
             playit.gg
-          </a>{" "}
-          (free), point it at port {info.port}, then paste the address it gives you here.
-          A bundled one-click tunnel is coming.
+          </a>
+          , point it at port {info.port}, and paste the address here — it overrides
+          the free tunnel.
         </p>
         <div className="flex gap-1.5">
           <input
             value={tunnel}
             onChange={(e) => setTunnel(e.target.value)}
-            placeholder="e.g. yourname.craft.playit.gg"
+            placeholder="you.craft.playit.gg"
             className="flex-1 rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
           />
           <Button
             variant="subtle"
-            disabled={busy || tunnel === (info.tunnelAddress ?? "")}
-            onClick={() => guard(() => api.setTunnelAddress(serverId, tunnel), "Saved.")}
+            disabled={busy}
+            onClick={() => guard(() => api.setTunnelAddress(serverId, tunnel || null), "Saved.")}
           >
             Save
           </Button>

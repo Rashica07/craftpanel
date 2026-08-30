@@ -33,6 +33,7 @@ import type {
   ShareInfo,
   ShareView,
   SystemInfo,
+  TunnelStatus,
   VersionInfo,
   WorldInfo,
 } from "./types";
@@ -246,6 +247,21 @@ export const api = {
   },
   setTunnelAddress(id: string, address: string | null): Promise<void> {
     return invoke("set_tunnel_address", { id, address });
+  },
+  tunnelStart(id: string): Promise<void> {
+    return invoke("tunnel_start", { id });
+  },
+  tunnelStop(id: string): Promise<void> {
+    return invoke("tunnel_stop", { id });
+  },
+  tunnelStatus(id: string): Promise<TunnelStatus> {
+    return invoke("tunnel_status", { id });
+  },
+  onTunnelStatus(fn: (id: string, s: TunnelStatus) => void): Promise<UnlistenFn> {
+    return listen<[string, TunnelStatus]>("tunnel:status", (e) => fn(e.payload[0], e.payload[1]));
+  },
+  onTunnelProgress(fn: (msg: string) => void): Promise<UnlistenFn> {
+    return listen<string>("tunnel:progress", (e) => fn(e.payload));
   },
   upnpForward(id: string): Promise<string> {
     return invoke("upnp_forward", { id });

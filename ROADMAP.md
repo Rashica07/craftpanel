@@ -173,13 +173,18 @@ done, `·` = not started.
   `crash-reports/` and surface the latest crash + likely-culprit mod.
 
 ### Phase 5 — Networking & sharing  ~
-- **Expose** ~ (2026-08-30) — `net.rs` + **Network tab**: LAN address, public
+- **Expose** ✓ (2026-08-30) — `net.rs` + **Network tab**: LAN address, public
   IP, **CGNAT detection** (100.64/10), **UPnP auto port-forward** (`igd-next` —
-  one-click "Forward port N", shows if it's already mapped), **QR code**
-  (`qrcode` → inline SVG), copy buttons, "recommended address" logic
-  (tunnel > forwarded-public > LAN). **Tunnel:** a paste-in address field
-  (playit.gg / bore / ngrok) persisted per server. **TODO:** bundle a
-  one-click tunnel agent (playit or bore) so there's zero setup.
+  one-click "Forward port N"), **QR code** (`qrcode` → inline SVG), copy
+  buttons, "recommended address" logic.
+- **In-app tunnel** ✓ (2026-08-30) — `tunnel.rs` bundles the `bore` client
+  (downloads the right release on first use, caches in the config dir, tar.gz
+  or .zip). **"Start free tunnel"** → `bore local <port> --to bore.pub` → live
+  `bore.pub:<port>` parsed from stderr, emitted as `tunnel:status`, feeds the
+  "recommended address" + QR. No account, no browser. Killed on app quit.
+  Temporary (port changes on restart, shared community server). A paste-in
+  **permanent address** (playit.gg) overrides it. **TODO:** self-hosted `bore
+  server` option for a stable custom address.
 - **Branding** ✓ (2026-08-30) — MOTD editor with live §-preview + server-icon
   picker. See Phase 4.
 - **Multi-device sync** (the private-code feature) — see its own section below.

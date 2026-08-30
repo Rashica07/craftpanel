@@ -15,6 +15,7 @@ use crate::db::{Db, NewServer, ServerRecord};
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
 use crate::schedule::{self, Schedule};
+use crate::tunnel::{TunnelManager, TunnelStatus};
 use crate::worlds::{self, WorldInfo};
 use crate::external::{self, ExternalStatus};
 use crate::java::{self, JavaInfo};
@@ -932,14 +933,21 @@ fn tunnel_key(id: &str) -> String {
 }
 
 #[tauri::command]
-pub fn net_info(db: State<Db>, id: String) -> Result<JoinInfo, String> {
+pub fn net_info(
+    db: State<Db>,
+    tunnel: State<Arc<TunnelManager>>,
+    id: String,
+) -> Result<JoinInfo, String> {
     let rec = load(&db, &id)?;
     let net = net::info(&rec.path);
-    let tunnel_address = db
-        .get_setting(&tunnel_key(&id))
-        .ok()
-        .flatten()
-        .filter(|s| !s.trim().is_empty());
+    // a running in-app tunnel wins; else the user's saved permanent address
+    let live_tunnel = tunnel.status(&id).address;
+    let tunnel_address = live_tunnel.clone().or_else(|| {
+        db.get_setting(&tunnel_key(&id))
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+    });
     let recommended = tunnel_address
         .clone()
         .or_else(|| {
@@ -951,6 +959,27 @@ pub fn net_info(db: State<Db>, id: String) -> Result<JoinInfo, String> {
         })
         .or_else(|| net.lan_address.clone());
     Ok(JoinInfo { net, tunnel_address, recommended })
+}
+
+#[tauri::command]
+pub fn tunnel_start(
+    db: State<Db>,
+    tunnel: State<Arc<TunnelManager>>,
+    id: String,
+) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    let port = external::port_of(std::path::Path::new(&rec.path));
+    tunnel.inner().start(&id, port)
+}
+
+#[tauri::command]
+pub fn tunnel_stop(tunnel: State<Arc<TunnelManager>>, id: String) {
+    tunnel.stop(&id);
+}
+
+#[tauri::command]
+pub fn tunnel_status(tunnel: State<Arc<TunnelManager>>, id: String) -> TunnelStatus {
+    tunnel.status(&id)
 }
 
 #[tauri::command]

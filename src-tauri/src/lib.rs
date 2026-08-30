@@ -23,6 +23,7 @@ mod settings;
 mod share;
 mod sync;
 mod system;
+mod tunnel;
 mod worlds;
 
 use std::sync::Arc;
@@ -36,6 +37,7 @@ use tauri::{
 use cloud::CloudManager;
 use db::Db;
 use process::ProcessManager;
+use tunnel::TunnelManager;
 
 /// Stable per-device id, exposed to commands.
 pub struct DeviceId(pub String);
@@ -81,10 +83,13 @@ pub fn run() {
                 procs.adopt_all(&servers);
             }
 
+            let tunnel = TunnelManager::new(app.handle().clone(), &dir);
+
             app.manage(db);
             app.manage(DeviceId(device_id));
             app.manage(procs);
             app.manage(cloud);
+            app.manage(tunnel);
 
             // automation engine (auto-restart, daily restart, timed commands)
             let offset = time::OffsetDateTime::now_local()
@@ -206,6 +211,9 @@ pub fn run() {
             commands::set_server_icon,
             commands::clear_server_icon,
             commands::net_info,
+            commands::tunnel_start,
+            commands::tunnel_stop,
+            commands::tunnel_status,
             commands::set_tunnel_address,
             commands::upnp_forward,
             commands::upnp_remove,
@@ -234,6 +242,9 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app, event| {
             if let RunEvent::ExitRequested { .. } = event {
+                if let Some(t) = app.try_state::<std::sync::Arc<TunnelManager>>() {
+                    t.stop_all();
+                }
                 if let Some(pm) = app.try_state::<ProcessManager>() {
                     pm.shutdown_and_release(&server_dirs(app));
                 }

@@ -184,6 +184,12 @@ export interface Schedule {
   backupOnStop: boolean;
 }
 
+export interface TunnelStatus {
+  running: boolean;
+  address: string | null;
+  error: string | null;
+}
+
 export interface JoinInfo {
   port: number;
   lanIp: string | null;

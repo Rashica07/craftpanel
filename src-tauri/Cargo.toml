@@ -38,4 +38,5 @@ flate2 = "1"
 igd-next = "0.15"
 qrcode = { version = "0.14", default-features = false }
 time = { version = "0.3", features = ["local-offset"] }
+tar = "0.4"
 
