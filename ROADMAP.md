@@ -166,11 +166,15 @@ done, `·` = not started.
   rejected; 2 MB text cap. Files tab. Plus a **Log-file view** (tail
   `logs/latest.log`, auto-refresh) in the Console tab — works for external /
   reattached servers that have no live stream.
-- **JVM / performance tuning** · — a JVM-args field per server (new DB column,
-  injected by `build_command`); one-click **Aikar's flags** preset scaled to
-  the RAM slider; show the resolved `java … -jar …` line.
-- **Perf & health view** · — live TPS/MSPT + process RAM/CPU graphs; parse
-  `crash-reports/` and surface the latest crash + likely-culprit mod.
+- **JVM / performance tuning** ✓ (2026-08-30) — `jvm_args` DB column, injected
+  by `build_command` (and `user_jvm_args.txt` for Forge argfiles); one-click
+  **Aikar's flags** scaled to the RAM slider (>12 GB gets the big-heap set);
+  "show launch command". JvmSection in Settings.
+- **Perf & health view** ✓ (2026-08-30) — `perf.rs`: JVM RAM/CPU via `sysinfo`,
+  TPS/MSPT over RCON (`/tick query` → `/tps` → `spark tps`). `HealthStrip`
+  sparklines on the Console tab. `crashreports.rs` parses `crash-reports/*.txt`
+  → latest crash's cause line + best-guess culprit mod (jar hint in the stack,
+  else package root); shown in the crash banner.
 
 ### Phase 5 — Networking & sharing  ~
 - **Expose** ✓ (2026-08-30) — `net.rs` + **Network tab**: LAN address, public
