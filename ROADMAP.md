@@ -310,8 +310,13 @@ still `·`.
   ES_SYSTEM_REQUIRED)` held on a helper thread for the server's lifetime (needs
   a tiny `windows`/`winapi` dep or an FFI shim); the toggle already persists and
   currently no-ops there with a console note.
-- **Bedrock & cross-play** · — Bedrock server as another `ServerAdapter`
-  (PowerNukkitX / BDS); one-click Geyser + Floodgate to bridge Java ↔ Bedrock.
+- **Bedrock & cross-play** ~ (batch 11, 2026-08-30) — `crossplay.rs`: one-click
+  **Geyser + Floodgate** from GeyserMC's build API into `plugins/` or `mods/`
+  (Paper / Spigot / Fabric / NeoForge), so Bedrock-edition friends (phone /
+  console / Win10 store) join the Java server with no Java account. Reads
+  Geyser's Bedrock UDP port; UPnP UDP forward for it. "Bedrock cross-play" card
+  in the Network tab. **TODO:** a full Bedrock *server* adapter (PowerNukkitX /
+  BDS) for the other direction.
 - **Self-update** ~ (batch 10) — `updater.rs` checks the GitHub Releases API
   against `CARGO_PKG_VERSION` and shows "vX available →" in app Settings (repo
   is a setting). Full signed auto-download+install via `tauri-plugin-updater`
