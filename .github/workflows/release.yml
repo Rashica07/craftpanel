@@ -1,12 +1,12 @@
 name: Build installers
 
 # Builds macOS (.dmg) and Windows 10/11 (.exe + .msi) installers.
-# Trigger by pushing a tag like v0.1.0, or run manually from the Actions tab.
+# Trigger by pushing a tag like v1.0.0, or run manually from the Actions tab.
 #
 # CraftPanel isn't a git repo yet. To use this:
 #   1. Create a private GitHub repo.
 #   2. git init && git add -A && git commit -m "init" && git remote add origin <url> && git push
-#   3. git tag v0.1.0 && git push --tags   ->  installers appear under Releases.
+#   3. git tag v1.0.0 && git push --tags   ->  installers appear under Releases.
 
 on:
   push:
