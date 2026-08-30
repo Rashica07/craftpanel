@@ -7,6 +7,7 @@ mod branding;
 mod cloud;
 mod commands;
 mod crashreports;
+mod crossplay;
 mod db;
 mod external;
 mod files;
@@ -265,6 +266,10 @@ pub fn run() {
             commands::app_settings_get,
             commands::app_settings_set,
             commands::check_update,
+            commands::crossplay_status,
+            commands::crossplay_enable,
+            commands::crossplay_disable,
+            commands::crossplay_forward,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,

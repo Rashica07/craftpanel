@@ -301,6 +301,14 @@ export interface TunnelStatus {
   error: string | null;
 }
 
+export interface CrossplayStatus {
+  compatible: boolean;
+  geyser: boolean;
+  floodgate: boolean;
+  bedrockPort: number;
+  folder: string;
+}
+
 export interface JoinInfo {
   port: number;
   lanIp: string | null;

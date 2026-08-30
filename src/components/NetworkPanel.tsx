@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { JoinInfo, TunnelStatus } from "../types";
+import type { CrossplayStatus, JoinInfo, TunnelStatus } from "../types";
 import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
 
@@ -32,6 +32,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
   const [qr, setQr] = useState<string | null>(null);
   const [tunnel, setTunnel] = useState("");
   const [tun, setTun] = useState<TunnelStatus>({ running: false, address: null, error: null });
+  const [xp, setXp] = useState<CrossplayStatus | null>(null);
   const [tunProgress, setTunProgress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
     setQr(null);
     load();
     api.tunnelStatus(serverId).then(setTun).catch(() => {});
+    api.crossplayStatus(serverId).then(setXp).catch(() => {});
   }, [load, serverId]);
 
   useEffect(() => {
@@ -254,6 +256,74 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
           </Button>
         </div>
       </div>
+
+      {/* Bedrock cross-play */}
+      {xp && xp.compatible && (
+        <div className="rounded-lg border border-edge bg-panel p-3">
+          <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
+            Bedrock cross-play
+          </div>
+          {!xp.geyser ? (
+            <>
+              <p className="mb-2 text-[11px] leading-snug text-ink-faint">
+                Let friends on the <strong>Bedrock edition</strong> (phone, console,
+                Windows 10/11 store) join this Java server — no Minecraft Java account
+                needed. Installs Geyser + Floodgate.
+              </p>
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={() =>
+                  guard(async () => {
+                    await api.crossplayEnable(serverId);
+                    setXp(await api.crossplayStatus(serverId));
+                  }, "Geyser + Floodgate installed — restart the server.")
+                }
+              >
+                Enable Bedrock cross-play
+              </Button>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge tone="ok">Geyser</Badge>
+                <Badge tone={xp.floodgate ? "ok" : "warn"}>
+                  {xp.floodgate ? "Floodgate" : "Floodgate missing"}
+                </Badge>
+              </div>
+              <Copyable
+                label="bedrock"
+                value={`${info.lanIp ?? "your-ip"} port ${xp.bedrockPort}`}
+              />
+              <p className="text-[11px] leading-snug text-ink-faint">
+                Bedrock uses <strong>UDP</strong> — the free tunnel above only carries
+                Java. For internet Bedrock friends, forward UDP {xp.bedrockPort}:
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => guard(() => api.crossplayForward(serverId), "UDP port forwarded.")}
+                >
+                  Forward UDP {xp.bedrockPort}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() =>
+                    guard(async () => {
+                      await api.crossplayDisable(serverId);
+                      setXp(await api.crossplayStatus(serverId));
+                    }, "Removed.")
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {note && <div className="rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{note}</div>}
       {error && (

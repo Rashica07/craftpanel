@@ -12,6 +12,7 @@ import type {
   CloudStatus,
   CrashReport,
   CreateSpec,
+  CrossplayStatus,
   MgmtStatus,
   Suspicion,
   DetectionResult,
@@ -282,6 +283,18 @@ export const api = {
   },
   qrSvg(text: string): Promise<string> {
     return invoke("qr_svg", { text });
+  },
+  crossplayStatus(id: string): Promise<CrossplayStatus> {
+    return invoke("crossplay_status", { id });
+  },
+  crossplayEnable(id: string): Promise<CrossplayStatus> {
+    return invoke("crossplay_enable", { id });
+  },
+  crossplayDisable(id: string): Promise<void> {
+    return invoke("crossplay_disable", { id });
+  },
+  crossplayForward(id: string): Promise<void> {
+    return invoke("crossplay_forward", { id });
   },
 
   // Stage 6.2 — automation

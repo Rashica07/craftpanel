@@ -14,6 +14,7 @@ use crate::mgmt::{self, MgmtStatus};
 use crate::backups::{self, Backup};
 use crate::branding;
 use crate::crashreports::{self, CrashReport};
+use crate::crossplay::{self, CrossplayStatus};
 use crate::db::{Db, NewServer, ServerRecord};
 use crate::modrinth::{self, InstallResult, InstalledEntry, SearchResult};
 use crate::perf::{self, PerfSample};
@@ -1306,6 +1307,34 @@ pub fn app_settings_set(db: State<Db>, settings: AppSettings) -> Result<(), Stri
 pub fn check_update(db: State<Db>) -> crate::updater::UpdateCheck {
     let repo = read_app_settings(&db).github_repo;
     crate::updater::check(if repo.is_empty() { None } else { Some(&repo) })
+}
+
+// --- Stage 11: Bedrock cross-play (Geyser) --------------------------------
+
+#[tauri::command]
+pub fn crossplay_status(db: State<Db>, id: String) -> Result<CrossplayStatus, String> {
+    let rec = load(&db, &id)?;
+    Ok(crossplay::status(&rec.path, rec.server_type))
+}
+
+#[tauri::command]
+pub fn crossplay_enable(db: State<Db>, id: String) -> Result<CrossplayStatus, String> {
+    let rec = load(&db, &id)?;
+    crossplay::enable(&rec.path, rec.server_type)
+}
+
+#[tauri::command]
+pub fn crossplay_disable(db: State<Db>, id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    crossplay::disable(&rec.path, rec.server_type)
+}
+
+/// Port-forward Geyser's Bedrock UDP port so Bedrock friends can connect.
+#[tauri::command]
+pub fn crossplay_forward(db: State<Db>, id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    let port = crossplay::status(&rec.path, rec.server_type).bedrock_port;
+    net::upnp_forward_port(port, true)
 }
 
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------

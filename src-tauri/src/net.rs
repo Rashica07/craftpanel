@@ -113,6 +113,21 @@ pub fn upnp_forward(server_dir: &str) -> Result<String, String> {
     Ok(format!("{ext}:{port}"))
 }
 
+/// Forward an arbitrary port (TCP or UDP) — used for Geyser's Bedrock UDP port.
+pub fn upnp_forward_port(port: u16, udp: bool) -> Result<(), String> {
+    let lan = lan_ip().ok_or("Couldn't find this machine's LAN address.")?;
+    let gw = gateway().ok_or("No UPnP router found on this network.")?;
+    let proto = if udp { PortMappingProtocol::UDP } else { PortMappingProtocol::TCP };
+    gw.add_port(
+        proto,
+        port,
+        SocketAddr::new(IpAddr::V4(lan), port),
+        86_400,
+        "CraftPanel Bedrock (Geyser)",
+    )
+    .map_err(|e| format!("Router refused the forward: {e}"))
+}
+
 pub fn upnp_remove(server_dir: &str) -> Result<(), String> {
     let port = external::port_of(std::path::Path::new(server_dir));
     let gw = gateway().ok_or("No UPnP router found.")?;
