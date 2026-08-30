@@ -13,6 +13,7 @@ use crate::backups::{self, Backup};
 use crate::branding;
 use crate::crashreports::{self, CrashReport};
 use crate::db::{Db, NewServer, ServerRecord};
+use crate::modrinth::{self, InstallResult, InstalledEntry, SearchResult};
 use crate::perf::{self, PerfSample};
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
@@ -1117,6 +1118,68 @@ pub fn set_jvm_args(
     let v = args.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     db.set_jvm_args(&id, v.as_deref()).map_err(|e| e.to_string())?;
     Ok(procs.is_running(&id))
+}
+
+// --- Stage 8: Modrinth content browser ------------------------------------
+
+#[tauri::command]
+pub fn modrinth_search(
+    db: State<Db>,
+    id: String,
+    query: String,
+    project_type: String,
+    offset: Option<u32>,
+) -> Result<SearchResult, String> {
+    let rec = load(&db, &id)?;
+    modrinth::search(
+        &rec.path,
+        rec.server_type,
+        &query,
+        &project_type,
+        rec.mc_version.as_deref(),
+        offset.unwrap_or(0),
+    )
+}
+
+#[tauri::command]
+pub fn modrinth_install(
+    db: State<Db>,
+    id: String,
+    project_id: String,
+    project_type: String,
+) -> Result<InstallResult, String> {
+    let rec = load(&db, &id)?;
+    modrinth::install(
+        &rec.path,
+        rec.server_type,
+        &project_id,
+        &project_type,
+        rec.mc_version.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn modrinth_installed(db: State<Db>, id: String) -> Result<Vec<InstalledEntry>, String> {
+    let rec = load(&db, &id)?;
+    Ok(modrinth::installed(&rec.path))
+}
+
+#[tauri::command]
+pub fn modrinth_check_updates(db: State<Db>, id: String) -> Result<Vec<InstalledEntry>, String> {
+    let rec = load(&db, &id)?;
+    modrinth::check_updates(&rec.path, rec.server_type, rec.mc_version.as_deref())
+}
+
+#[tauri::command]
+pub fn modrinth_update(db: State<Db>, id: String, project_id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    modrinth::update_one(&rec.path, rec.server_type, &project_id, rec.mc_version.as_deref())
+}
+
+#[tauri::command]
+pub fn modrinth_remove(db: State<Db>, id: String, project_id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    modrinth::remove_one(&rec.path, rec.server_type, &project_id)
 }
 
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------

@@ -20,6 +20,7 @@ import { FilesPanel } from "./FilesPanel";
 import { LogView } from "./LogView";
 import { AdminPanel } from "./AdminPanel";
 import { WorldsPanel } from "./WorldsPanel";
+import { BrowsePanel } from "./BrowsePanel";
 import { NetworkPanel } from "./NetworkPanel";
 import { PlayerHistory } from "./PlayerHistory";
 import { HealthStrip } from "./HealthStrip";
@@ -34,7 +35,8 @@ type Tab =
   | "backups"
   | "files"
   | "worlds"
-  | "network";
+  | "network"
+  | "browse";
 
 function useUptime(startedAt: number | null, live: boolean) {
   const [, tick] = useState(0);
@@ -222,6 +224,7 @@ export function ServerDetail({
     { id: "players", label: "Players", icon: "users" },
     { id: "settings", label: "Settings", icon: "sliders" },
     ...(hasMods ? [{ id: "mods" as Tab, label: "Mods", icon: "package" }] : []),
+    { id: "browse", label: "Browse", icon: "search" },
     { id: "worlds", label: "Worlds", icon: "globe" },
     { id: "network", label: "Network", icon: "signal" },
     { id: "files", label: "Files", icon: "folder" },
@@ -481,6 +484,13 @@ export function ServerDetail({
           />
         )}
         {tab === "mods" && hasMods && <ModsPanel serverId={server.id} />}
+        {tab === "browse" && (
+          <BrowsePanel
+            serverId={server.id}
+            serverType={server.server_type}
+            onNeedsRestart={() => setPendingRestart(true)}
+          />
+        )}
         {tab === "worlds" && (
           <WorldsPanel serverId={server.id} locked={active || externalRunning} />
         )}

@@ -11,6 +11,7 @@ mod external;
 mod files;
 mod java;
 mod minecraft;
+mod modrinth;
 mod mods;
 mod net;
 mod perf;
@@ -227,6 +228,12 @@ pub fn run() {
             commands::list_crashes,
             commands::get_jvm_args,
             commands::set_jvm_args,
+            commands::modrinth_search,
+            commands::modrinth_install,
+            commands::modrinth_installed,
+            commands::modrinth_check_updates,
+            commands::modrinth_update,
+            commands::modrinth_remove,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,

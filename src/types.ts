@@ -184,6 +184,44 @@ export interface Schedule {
   backupOnStop: boolean;
 }
 
+export interface ModrinthHit {
+  projectId: string;
+  slug: string;
+  title: string;
+  description: string;
+  downloads: number;
+  iconUrl: string | null;
+  projectType: string;
+  categories: string[];
+  installed: boolean;
+}
+
+export interface ModrinthSearch {
+  hits: ModrinthHit[];
+  total: number;
+}
+
+export interface ModrinthUpdate {
+  versionId: string;
+  versionNumber: string;
+}
+
+export interface ModrinthInstalled {
+  projectId: string;
+  slug: string;
+  title: string;
+  filename: string;
+  versionId: string;
+  versionNumber: string;
+  dependency: boolean;
+  update: ModrinthUpdate | null;
+}
+
+export interface ModrinthInstallResult {
+  installed: string[];
+  skipped: string[];
+}
+
 export interface PerfSample {
   ramMb: number | null;
   cpuPct: number | null;

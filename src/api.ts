@@ -19,6 +19,9 @@ import type {
   Loader,
   LogLine,
   ModList,
+  ModrinthInstallResult,
+  ModrinthInstalled,
+  ModrinthSearch,
   NewServer,
   JoinInfo,
   PlayerAction,
@@ -299,6 +302,35 @@ export const api = {
   },
   setJvmArgs(id: string, args: string | null): Promise<boolean> {
     return invoke("set_jvm_args", { id, args });
+  },
+
+  // Stage 8 — Modrinth content browser
+  modrinthSearch(
+    id: string,
+    query: string,
+    projectType: string,
+    offset = 0,
+  ): Promise<ModrinthSearch> {
+    return invoke("modrinth_search", { id, query, projectType, offset });
+  },
+  modrinthInstall(
+    id: string,
+    projectId: string,
+    projectType: string,
+  ): Promise<ModrinthInstallResult> {
+    return invoke("modrinth_install", { id, projectId, projectType });
+  },
+  modrinthInstalled(id: string): Promise<ModrinthInstalled[]> {
+    return invoke("modrinth_installed", { id });
+  },
+  modrinthCheckUpdates(id: string): Promise<ModrinthInstalled[]> {
+    return invoke("modrinth_check_updates", { id });
+  },
+  modrinthUpdate(id: string, projectId: string): Promise<void> {
+    return invoke("modrinth_update", { id, projectId });
+  },
+  modrinthRemove(id: string, projectId: string): Promise<void> {
+    return invoke("modrinth_remove", { id, projectId });
   },
 
   // branding + worlds
