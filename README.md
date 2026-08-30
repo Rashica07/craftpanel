@@ -1,117 +1,117 @@
+<div align="center">
+
 # CraftPanel
 
-Self-hosted Minecraft server manager. Tauri desktop app (macOS + Windows).
+**Run your own Minecraft server — without the config files, the terminal, or the port-forwarding headache.**
 
-- **Frontend:** React + TypeScript + Vite + Tailwind v4 (dark, orange `#FF8C00` accent)
-- **Backend:** Rust via Tauri commands — no separate server process
-- **Storage:** SQLite (`rusqlite`, bundled) in the app config dir
-- **Server comms:** RCON (Stage 3+)
+A desktop app for macOS and Windows that creates, runs, and shares Minecraft servers.
+Pick a version, press Start, send your friends a link. That's it.
 
-## Installing the build (macOS, unsigned)
+[Download](#download) · [Features](#what-it-does) · [Roadmap](ROADMAP.md)
 
-The `.dmg` isn't notarised yet, so macOS Sequoia blocks it with
-"Apple could not verify…". Fix after dragging to Applications:
+</div>
 
-```bash
-xattr -dr com.apple.quarantine /Applications/CraftPanel.app
-```
+---
 
-or: System Settings → Privacy & Security → scroll to "CraftPanel.app was
-blocked" → **Open Anyway**. Proper notarisation is Phase 7 (needs an Apple
-Developer account).
+## What it does
 
-## Prerequisites
+**Create a server in under a minute.**
+Choose Vanilla, Paper, Fabric, Forge or NeoForge and a Minecraft version — CraftPanel
+downloads the server, sets up the config, accepts the EULA, and first-boots it for you.
+Pick a seed, gamemode, difficulty and MOTD right in the wizard.
 
-- Node 20+
-- Rust (stable). Installed here via Homebrew `rustup`, which is keg-only:
-  `export PATH="/usr/local/opt/rustup/bin:$PATH"` (already added to `~/.zshrc`).
-- A JDK to actually run Minecraft servers (Temurin 17 or 21).
+**Start and stop it like an app.**
+A real console, a live player list, one-click RCON, and RAM/CPU/TPS graphs so you can
+see how it's running. Crashes are caught and explained — it even points at the mod that
+likely caused it.
 
-## Develop
+**Let friends join from anywhere.**
+Built-in tunnel: one click gives you an address that works over the internet with no
+router setup. Or auto-forward your port over UPnP. Copy the address, or scan the QR code.
+Bedrock players (phone, console, Windows 10/11) can join too — one click installs Geyser.
+
+**Manage everything without leaving the app.**
+Browse and install mods & plugins from Modrinth with automatic dependency resolution.
+Edit `server.properties` as friendly toggles. Switch worlds. Manage ops, whitelist and
+bans. Browse and edit files. Take backups and restore them — the old world is always
+moved aside, never deleted.
+
+**Keep it running.**
+Auto-restart on crash, scheduled daily restarts with an in-game countdown, timed commands,
+and automatic backups on stop. Close the window and it keeps running in the menu bar / tray.
+Optionally keep your computer awake so the server stays up while you're away.
+
+**Play together across computers.**
+Share a world with a friend using a private code. CraftPanel moves the world to your own
+Cloudflare R2 storage on stop and pulls the latest on start — whoever's playing holds the
+lock so you never overwrite each other.
+
+---
+
+## Download
+
+Grab the latest installer from the [**Releases**](../../releases) page:
+
+| Platform | File |
+| --- | --- |
+| **Windows 10 / 11** | `CraftPanel_*_x64-setup.exe` |
+| **macOS (Apple Silicon)** | `CraftPanel_*_aarch64.dmg` |
+| **macOS (Intel)** | `CraftPanel_*_x64.dmg` |
+
+### First launch
+
+The app isn't code-signed yet, so your OS will warn you the first time:
+
+- **Windows** — "Windows protected your PC" → **More info** → **Run anyway**.
+- **macOS** — right-click the app → **Open** → **Open**. If that doesn't work,
+  System Settings → Privacy & Security → **Open Anyway**, or run
+  `xattr -dr com.apple.quarantine /Applications/CraftPanel.app`.
+
+You'll also need **Java** installed to actually run a server (Temurin 17 or 21).
+
+---
+
+## How it works
+
+CraftPanel is a single native app — there's no background service, no Docker, no account.
+It launches the Minecraft server as a normal process on your machine and talks to it over
+RCON and its console. Your worlds and files stay on your disk; the only things that leave
+your computer are the version downloads (from Mojang / PaperMC / Modrinth), the optional
+tunnel traffic, and — if you turn on world sync — your world going to *your* Cloudflare
+storage.
+
+Built with [Tauri](https://tauri.app) (Rust) and React. Game-specific logic lives behind a
+single adapter, so other games can be added later.
+
+---
+
+## Status
+
+CraftPanel is under active development. The core — create, run, configure, mod, back up,
+expose, cross-play — works today. Some pieces are still maturing:
+
+- Installers aren't signed/notarised yet (see *First launch* above).
+- World sync needs a one-time Cloudflare R2 token and hasn't been battle-tested.
+- The full Minecraft 1.21.9+ management API and a Bedrock *server* mode are planned.
+
+See [ROADMAP.md](ROADMAP.md) for the whole picture.
+
+---
+
+## Building from source
 
 ```bash
 npm install
-npm run tauri dev     # launches the desktop app
+npm run tauri dev          # run the app
+npm run tauri build        # produce an installer for your platform
+
+cd src-tauri && cargo test # backend tests
+npm run build              # typecheck + bundle the frontend
 ```
 
-## Test
+Requires Node 20+ and a stable Rust toolchain. Pushing a `v*` tag builds signed-off
+installers for macOS and Windows via GitHub Actions.
 
-```bash
-cd src-tauri && cargo test     # adapter detection, Java mapping, DB round-trip
-npm run build                  # typecheck + production frontend bundle
-```
+## License
 
-## Architecture
-
-Game-specific logic sits behind the `ServerAdapter` trait
-(`src-tauri/src/adapter.rs`); a FiveM adapter can be added later without
-touching the UI or process layer.
-
-| Module | Responsibility |
-| --- | --- |
-| `adapter.rs` | `ServerAdapter` trait, `ServerType`, `ServerConfig`, `ServerStatus` |
-| `minecraft.rs` | Detects Fabric / Forge / Paper / Spigot / vanilla + MC version |
-| `java.rs` | `java -version` parsing, MC→Java compatibility rules |
-| `db.rs` | SQLite schema + server-list CRUD |
-| `system.rs` | Host RAM / CPU facts for the allocation slider |
-| `process.rs` | Spawn/stop/kill, console ring buffer, crash detection (via an `EventSink` seam so it's unit-testable), reattach after restart, keep-awake |
-| `session.rs` | `<server>/.craftpanel-session.json` — lets a restart re-adopt its own running servers |
-| `backups.rs` | zip/restore the server folder; retention |
-| `files.rs` | in-app file manager (list/read/write/rename/mkdir/delete-to-trash) + log tail |
-| `admin.rs` | ops / whitelist / bans overview (name-keyed) |
-| `worlds.rs` | list / switch / create / rename / delete worlds |
-| `branding.rs` | 64×64 `server-icon.png` from any image |
-| `analytics.rs` | player history from `logs/` (first/last seen, playtime, IP) |
-| `commands.rs` | Tauri command surface |
-
-See [ROADMAP.md](ROADMAP.md) for the full plan (create-server wizard, advanced
-config menu, NeoForge, packaging).
-
-## Stage status
-
-- [x] **Stage 1** — project setup, server detection, Add Server flow
-- [x] **Stage 2** — process management: start/stop/kill (no shell), RAM slider
-  (`Xms = Xmx`, system-RAM bounded), console ring buffer (500 lines) + live
-  viewer with command input, crash vs clean-stop, **pre-flight EULA**,
-  external-running-server detection
-- [x] **Stage 2.5** — Create Server wizard: pick loader (Vanilla/Paper/Fabric/
-  NeoForge/Forge) → version (live lists from Mojang / PaperMC Fill v3 / FabricMC
-  meta / NeoForge + Forge maven) → name/folder/RAM → EULA → download (checksum
-  verified) → first-boot to generate config. NeoForge/Forge run their installer.
-- [x] **Stage 3** — RCON: source-RCON client, `server.properties` line-preserving
-  editor, one-click RCON setup (writes only the 4 rcon keys, never `online-mode`),
-  live player list, kick/ban/op/whitelist/gamemode by username, free-form
-  RCON command box.
-
-**Stages 2.5 + 3 verified end to end** against real Minecraft: an ignored test
-(`cargo test e2e_create_paper_then_rcon -- --ignored`) creates a Paper 1.21.11
-server from scratch, first-boots it, enables RCON, launches it, and queries
-`/list` over RCON — all green.
-- [x] **Stage 4** — tabbed server detail (Console / Players / Settings / Mods).
-  `server.properties` editor with **Common / Advanced / Raw** tiers (Advanced =
-  the perf & behaviour knobs experienced admins use, each explained); every write
-  is line-preserving. Mods: enable/disable (`mods/` ↔ `mods-disabled/`), import
-  `.jar`s, soft-remove to `.craftpanel-trash/`, Fabric-API + offline-auth-mod
-  detection. "Restart to apply" banner when settings change on a live server.
-- [x] **Multi-device sharing** — two modes, both with an advisory lease so only
-  one device runs the world at a time:
-  - **Cloud (default)** — CraftPanel uploads the world to *your* Cloudflare R2
-    bucket on stop and pulls the latest on start. One-time setup: paste an R2 API
-    token. Fully in-app, no synced folder. *(Built; needs a live token to test
-    end to end.)*
-  - **Synced folder** — `craftpanel-share.json` + `craftpanel-lease.json` in a
-    folder you keep in iCloud/Dropbox. Offline/LAN friendly.
-- [ ] **Phase 4** rest — Modrinth browser, file manager, JVM/Aikar, perf graphs
-- [ ] **Phase 5** — port-forward/tunnel + branding
-- [ ] **Phase 6** — backups, scheduler, world tools, analytics, anti-cheat
-- [~] **Phase 7 MVP** — **tray icon** (close window while a server runs → hides
-  to tray, doesn't quit; left-click reopens; menu: Show / Quit), **session
-  persistence** (`<server>/.craftpanel-session.json` → a restart re-adopts its
-  own servers as "Running (reattached)" instead of "external"), **keep-awake
-  toggle** (macOS `caffeinate` for the server's lifetime; Windows pending).
-  Still to do: signed installers, per-server tray items, Bedrock/Geyser,
-  self-update — see [ROADMAP.md](ROADMAP.md).
-
-See [ROADMAP.md](ROADMAP.md) — the 13 stages are now consolidated into 7 phases.
-- [ ] **Stage 5** — UPnP / CGNAT detection, branding
-- [ ] **Stage 6** — signed installers (macOS .dmg, Windows NSIS), self-update
+TBD.
