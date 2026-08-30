@@ -13,6 +13,7 @@ import {
   Tooltip,
   cx,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 function num(n: number) {
@@ -21,13 +22,38 @@ function num(n: number) {
   return `${n}`;
 }
 
+const LOADER_NAME: Record<ServerType, string> = {
+  fabric: "Fabric",
+  forge: "Forge",
+  paper: "Paper",
+  spigot: "Spigot",
+  vanilla: "Vanilla",
+  bedrock: "Bedrock",
+};
+
+/**
+ * Fabric/Forge check every joining client's mod list against the server's and
+ * refuse the connection with a clear reason if something required is
+ * missing — that's built into the loader's own handshake, nothing CraftPanel
+ * has to do. Paper/Spigot plugins have no such mechanism: a player missing a
+ * required client mod just joins and something silently doesn't work, so the
+ * admin has to tell people themselves.
+ */
+function enforcesClientModsFor(t: ServerType): boolean {
+  return t === "fabric" || t === "forge";
+}
+
 function typesFor(t: ServerType): { id: string; label: string }[] {
   if (t === "vanilla") return [{ id: "datapack", label: "Datapacks" }];
   const primary =
     t === "paper" || t === "spigot"
       ? { id: "mod", label: "Plugins" }
       : { id: "mod", label: "Mods" };
-  return [primary, { id: "datapack", label: "Datapacks" }, { id: "modpack", label: "Modpacks" }];
+  // "Modpacks" used to be a search category here, but installing a modpack
+  // into an already-created server never really worked — a pack dictates
+  // its own loader + Minecraft version, which can't change after the fact.
+  // It's a real create-time flow now (see the wizard's Modpack step).
+  return [primary, { id: "datapack", label: "Datapacks" }];
 }
 
 export function BrowsePanel({
@@ -113,6 +139,7 @@ export function BrowsePanel({
   }
 
   const updates = installed.filter((i) => i.update);
+  const enforcesClientMods = enforcesClientModsFor(serverType);
 
   return (
     <div className="flex h-full flex-col">
@@ -140,11 +167,7 @@ export function BrowsePanel({
           {note}
         </Banner>
       )}
-      {error && (
-        <Banner tone="bad" className="mb-2" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-2" />
 
       {/* ── results ──────────────────────────────────────────────── */}
       <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line-soft bg-surface shadow-e1">
@@ -202,13 +225,28 @@ export function BrowsePanel({
                         </Badge>
                       </Tooltip>
                     )}
-                    {h.serverSide === "optional" && h.compatible && (
-                      <Tooltip label="Works on the server, but your friends get more out of it if they install it too.">
-                        <Badge tone="neutral" size="sm">
-                          Better with client
+                    {h.clientSide === "required" && h.compatible && (
+                      <Tooltip
+                        label={
+                          enforcesClientMods
+                            ? `Everyone joining needs this installed too — ${LOADER_NAME[serverType]} won't let a player in without it, so they'll see a clear reason if they forget.`
+                            : "Everyone joining needs this installed too — Paper/Spigot can't enforce that, so tell your friends yourself (the Network tab's join info is a good place)."
+                        }
+                      >
+                        <Badge tone="warn" size="sm" icon="alert">
+                          Players need this too
                         </Badge>
                       </Tooltip>
                     )}
+                    {h.clientSide === "optional" &&
+                      h.serverSide === "optional" &&
+                      h.compatible && (
+                        <Tooltip label="Works fine either way — your friends get more out of it if they install it too, but nothing breaks if they don't.">
+                          <Badge tone="neutral" size="sm">
+                            Better with client
+                          </Badge>
+                        </Tooltip>
+                      )}
                   </div>
                   <p className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-faint">
                     {h.description}

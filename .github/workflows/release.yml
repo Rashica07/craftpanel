@@ -5,6 +5,17 @@ name: Build installers
 #
 # Trigger: push a tag like v1.0.0  (git tag v1.0.1 && git push origin v1.0.1)
 # or run it by hand from the Actions tab (uses whatever the latest tag is).
+#
+# Also signs the installers and publishes a `latest.json` update manifest,
+# so the in-app auto-updater (Settings → Updates) can find and verify new
+# releases. Needs two repo secrets — TAURI_SIGNING_PRIVATE_KEY and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD — set from the keypair generated with
+# `npx tauri signer generate`. Without them the build still succeeds, it
+# just won't produce signed updater artifacts and in-app updates won't work.
+#
+# The release stays a draft until published by hand — the updater only ever
+# looks at the latest *published* (non-draft) release, so nothing goes out
+# to users until you hit Publish on GitHub.
 
 on:
   push:
@@ -51,6 +62,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}

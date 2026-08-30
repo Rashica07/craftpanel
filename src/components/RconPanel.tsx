@@ -3,7 +3,6 @@ import { api } from "../api";
 import type { PlayerAction, PlayerList, RconSettings } from "../types";
 import {
   Badge,
-  Banner,
   Button,
   Card,
   Select,
@@ -12,7 +11,9 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
+import { CommandInput } from "./CommandInput";
 
 export function RconPanel({
   serverId,
@@ -322,13 +323,15 @@ export function RconPanel({
           )}
 
           <div className="flex items-center gap-2 border-t border-line-soft bg-surface-2 px-3.5 py-2">
-            <span className="select-none font-mono text-xs text-accent">/</span>
-            <input
+            <CommandInput
               value={cmd}
-              onChange={(e) => setCmd(e.target.value)}
+              onChange={setCmd}
               onKeyDown={(e) => e.key === "Enter" && sendCmd()}
+              players={list?.players}
               placeholder="Run a command — e.g. time set day"
-              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-ghost"
+              prefix={
+                <span className="select-none font-mono text-xs text-accent">/</span>
+              }
             />
             <Button
               variant={cmd.trim() ? "primary" : "subtle"}
@@ -354,9 +357,7 @@ export function RconPanel({
       )}
       {error && (
         <div className="p-3.5 pt-0">
-          <Banner tone="bad" onDismiss={() => setError(null)}>
-            {error}
-          </Banner>
+          <ErrorBanner message={error} onDismiss={() => setError(null)} />
         </div>
       )}
     </Card>

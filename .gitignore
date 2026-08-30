@@ -13,3 +13,6 @@ src-tauri/gen/schemas/
 # logs / scratch
 *.log
 npm-debug.log*
+
+# updater signing keypair — private key must never be committed
+.updater-key-DO-NOT-COMMIT/

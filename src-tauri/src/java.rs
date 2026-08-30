@@ -59,7 +59,9 @@ fn parse_major(text: &str) -> Option<u32> {
 pub fn required_java_for_mc(mc_version: &str) -> u32 {
     let (major, minor, patch) = parse_mc(mc_version);
     if major != 1 {
-        return 21;
+        // Mojang's year-based scheme (e.g. "26.1") replaced "1.x" starting
+        // with 2026 releases — 26.0 and up ship needing Java 25+, not 21.
+        return if major >= 26 { 25 } else { 21 };
     }
     match minor {
         0..=16 => 8,
@@ -124,6 +126,9 @@ mod tests {
         assert_eq!(required_java_for_mc("1.20.4"), 17);
         assert_eq!(required_java_for_mc("1.20.6"), 21);
         assert_eq!(required_java_for_mc("1.21.1"), 21);
+        // the year-based scheme that replaced "1.x" starting in 2026
+        assert_eq!(required_java_for_mc("26.0"), 25);
+        assert_eq!(required_java_for_mc("26.1"), 25);
     }
 
     #[test]

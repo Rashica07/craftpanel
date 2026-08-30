@@ -1,8 +1,18 @@
-//! Lightweight "is there a newer release?" check against GitHub Releases.
-//! (Full signed auto-install via the Tauri updater is a follow-up — it needs
-//! the CI to sign artifacts.)
+//! Lightweight "is there a newer release?" check against GitHub Releases,
+//! plus the real signed auto-install via `tauri-plugin-updater`.
+//!
+//! The endpoint is built at install time (not baked into `tauri.conf.json`)
+//! because the GitHub repo is a per-install setting (`AppSettings.github_repo`)
+//! — different builds of CraftPanel can point at different forks' releases.
+//! CI signs release artifacts and publishes a `latest.json` manifest
+//! alongside them (see `.github/workflows/release.yml`); the public key that
+//! verifies that signature lives in `tauri.conf.json`.
 
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_updater::UpdaterExt;
+
+use crate::provision::Progress;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +85,80 @@ pub fn check(repo: Option<&str>) -> UpdateCheck {
         current,
         unavailable: None,
     }
+}
+
+/// Download and install the latest signed release, emitting `update:progress`
+/// events as it goes. On success the frontend is expected to call the
+/// process plugin's `relaunch()` — this function doesn't restart the app
+/// itself, since a command that never returns is awkward to await from JS.
+pub async fn install(app: &AppHandle, repo: Option<&str>) -> Result<(), String> {
+    let repo = repo
+        .map(str::trim)
+        .filter(|s| s.contains('/'))
+        .ok_or_else(|| "Set your GitHub repo in Settings to update.".to_string())?;
+
+    let endpoint = format!("https://github.com/{repo}/releases/latest/download/latest.json")
+        .parse()
+        .map_err(|e| format!("bad update endpoint: {e}"))?;
+
+    emit(app, "checking", "Checking for the latest release…", None);
+
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No update available.".to_string())?;
+
+    let app_chunk = app.clone();
+    let app_done = app.clone();
+    let mut downloaded: u64 = 0;
+    let mut last_pct: i64 = -1;
+
+    update
+        .download_and_install(
+            move |chunk_len, total_len| {
+                downloaded += chunk_len as u64;
+                let Some(total) = total_len.filter(|t| *t > 0) else {
+                    return;
+                };
+                let pct = ((downloaded as f64 / total as f64) * 100.0).min(100.0) as u8;
+                if pct as i64 != last_pct {
+                    last_pct = pct as i64;
+                    emit(
+                        &app_chunk,
+                        "downloading",
+                        &format!("Downloading update… {pct}%"),
+                        Some(pct),
+                    );
+                }
+            },
+            move || {
+                emit(&app_done, "installing", "Installing update…", Some(100));
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    emit(app, "done", "Update installed. Restart to finish.", Some(100));
+    Ok(())
+}
+
+fn emit(app: &AppHandle, stage: &str, message: &str, pct: Option<u8>) {
+    let _ = app.emit(
+        "update:progress",
+        &Progress {
+            stage: stage.into(),
+            message: message.into(),
+            pct,
+        },
+    );
 }
 
 #[cfg(test)]

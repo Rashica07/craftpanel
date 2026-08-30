@@ -13,6 +13,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 function mb(bytes: number) {
@@ -233,11 +234,7 @@ export function ModsPanel({ serverId }: { serverId: string }) {
         </p>
       </Card>
 
-      {error && (
-        <Banner tone="bad" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
     </div>
   );
 }

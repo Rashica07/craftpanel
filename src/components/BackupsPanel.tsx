@@ -3,7 +3,6 @@ import { api } from "../api";
 import type { Backup } from "../types";
 import {
   Badge,
-  Banner,
   Button,
   Card,
   Field,
@@ -14,6 +13,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 function size(bytes: number) {
@@ -44,6 +44,7 @@ export function BackupsPanel({
   locked: boolean;
 }) {
   const [backups, setBackups] = useState<Backup[] | null>(null);
+  const [cloudBackups, setCloudBackups] = useState<Backup[]>([]);
   const [keep, setKeep] = useState<number>(20);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,6 +57,7 @@ export function BackupsPanel({
   const load = useCallback(() => {
     api.listBackups(serverId).then(setBackups).catch((e) => setError(String(e)));
     api.getBackupsConfig().then((c) => setKeep(c.keep)).catch(() => {});
+    api.cloudBackups(serverId).then(setCloudBackups).catch(() => setCloudBackups([]));
   }, [serverId]);
 
   useEffect(() => {
@@ -150,11 +152,17 @@ export function BackupsPanel({
         )}
       </Card>
 
-      {error && (
-        <Banner tone="bad" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
+      {cloudBackups.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-line-soft bg-surface-2 px-3.5 py-2.5 text-2xs text-ink-dim">
+          <Icon name="cloud-upload" size={13} className="shrink-0 text-info" />
+          <span>
+            {cloudBackups.length} backup{cloudBackups.length > 1 ? "s" : ""} also in the cloud
+            — newest {ago(cloudBackups[0].createdAt)}
+          </span>
+        </div>
       )}
+
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       <Card
         title="Your backups"

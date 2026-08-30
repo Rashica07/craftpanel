@@ -7,6 +7,7 @@ import {
   type ServerRecord,
 } from "../types";
 import { Badge, Button, Field, IconButton, TextInput, useDismissOnEscape } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 const ALL_TYPES: ServerType[] = ["fabric", "forge", "paper", "spigot", "vanilla"];
 
@@ -187,11 +188,7 @@ export function AddServerModal({
             </div>
           )}
 
-          {error && (
-            <div className="mt-3 rounded-md border border-bad/30 bg-bad-muted px-3 py-2 text-xs text-bad-soft">
-              {error}
-            </div>
-          )}
+          <ErrorBanner message={error} className="mt-3" />
         </div>
 
         <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">

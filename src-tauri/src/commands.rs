@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::adapter::ServerType;
 use crate::admin::{self, AdminLists};
@@ -78,7 +78,7 @@ pub fn detect_server(path: String) -> DetectionResult {
         Some(d) => {
             if java.is_none() {
                 warnings.push(
-                    "No Java runtime found on PATH. Install a JDK (Temurin 17 or 21) before starting this server."
+                    "No Java runtime found on PATH. Install a JDK (Temurin 17, 21, or 25) before starting this server."
                         .to_string(),
                 );
             }
@@ -105,24 +105,40 @@ pub fn detect_server(path: String) -> DetectionResult {
                 warnings,
             }
         }
-        None => {
-            warnings.push(
-                "No Minecraft server detected here. Expected something like fabric-server-launch.jar, \
-                 a Forge run script, paper.jar, spigot.jar, or server.jar."
-                    .to_string(),
-            );
-            DetectionResult {
+        None => match crate::bedrock::inspect(p) {
+            // A Bedrock server needs no `java` at all — don't warn about it
+            // missing just because this folder happens to be Bedrock.
+            Some(d) => DetectionResult {
                 path,
-                detected: false,
-                server_type: None,
-                server_type_label: None,
-                launch_target: None,
+                detected: true,
+                server_type: Some(ServerType::Bedrock),
+                server_type_label: Some(ServerType::Bedrock.label().to_string()),
+                launch_target: Some(d.launch_target.clone()),
                 mc_version: None,
-                evidence: Vec::new(),
-                java,
+                evidence: vec![d.launch_target],
+                java: None,
                 warnings,
+            },
+            None => {
+                warnings.push(
+                    "No Minecraft server detected here. Expected something like \
+                     fabric-server-launch.jar, a Forge run script, paper.jar, spigot.jar, \
+                     server.jar, or bedrock_server."
+                        .to_string(),
+                );
+                DetectionResult {
+                    path,
+                    detected: false,
+                    server_type: None,
+                    server_type_label: None,
+                    launch_target: None,
+                    mc_version: None,
+                    evidence: Vec::new(),
+                    java,
+                    warnings,
+                }
             }
-        }
+        },
     }
 }
 
@@ -132,9 +148,46 @@ pub fn detect_java(path: Option<String>) -> Option<JavaInfo> {
     java::probe(path.as_deref())
 }
 
+/// Which bundled Java version (17, 21, or 25) a Minecraft version needs, or
+/// `None` if it needs one CraftPanel doesn't offer to auto-install (very old
+/// MC needing Java 8, or the narrow 1.17-only Java 16 case).
+#[tauri::command]
+pub fn java_offerable_for(mc_version: String) -> Option<u8> {
+    crate::javainstall::offerable_feature(java::required_java_for_mc(&mc_version))
+}
+
+/// Already installed? Doesn't touch the network — just checks disk.
+#[tauri::command]
+pub fn java_install_status(app: tauri::AppHandle, feature: u8) -> Result<Option<JavaInfo>, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(crate::javainstall::installed_path(&dir, feature)
+        .and_then(|p| java::probe(p.to_str())))
+}
+
+/// Downloads, checksum-verifies, and extracts a Java runtime — see
+/// `javainstall.rs` for the full flow. Emits `java-install:progress` as it
+/// goes, same shape as `provision:progress`.
+#[tauri::command]
+pub fn install_java(app: tauri::AppHandle, feature: u8) -> Result<JavaInfo, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let app2 = app.clone();
+    crate::javainstall::install(&dir, feature, &move |p| {
+        let _ = app2.emit("java-install:progress", &p);
+    })
+}
+
+/// Point one server at a specific `java` executable — e.g. the one
+/// `install_java` just installed.
+#[tauri::command]
+pub fn set_server_java_path(db: State<Db>, id: String, java_path: String) -> Result<(), String> {
+    db.update_java_path(&id, &java_path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn add_server(db: State<Db>, server: NewServer) -> Result<ServerRecord, String> {
-    db.insert_server(server).map_err(|e| e.to_string())
+    let rec = db.insert_server(server).map_err(|e| e.to_string())?;
+    crate::attribution::stamp(&db, &rec.path, "added");
+    Ok(rec)
 }
 
 #[tauri::command]
@@ -176,7 +229,7 @@ pub fn check_external(db: State<Db>, id: String) -> Result<ExternalStatus, Strin
 #[tauri::command]
 pub fn eula_state(db: State<Db>, id: String) -> Result<bool, String> {
     let rec = load(&db, &id)?;
-    Ok(crate::process::eula_accepted(std::path::Path::new(&rec.path)))
+    Ok(crate::process::eula_accepted(std::path::Path::new(&rec.path), rec.server_type))
 }
 
 /// Sentinel the frontend checks for to show the one-time EULA prompt.
@@ -193,7 +246,7 @@ pub fn start_server(
     let rec = load(&db, &id)?;
 
     // EULA pre-flight — accept it up front rather than letting the server bail.
-    if !crate::process::eula_accepted(std::path::Path::new(&rec.path)) {
+    if !crate::process::eula_accepted(std::path::Path::new(&rec.path), rec.server_type) {
         if accept_eula.unwrap_or(false) {
             procs.accept_eula(&rec)?;
         } else {
@@ -541,6 +594,7 @@ fn parse_loader(s: &str) -> Result<Loader, String> {
         "fabric" => Loader::Fabric,
         "neoforge" => Loader::Neoforge,
         "forge" => Loader::Forge,
+        "bedrock" => Loader::Bedrock,
         other => return Err(format!("Unknown loader: {other}")),
     })
 }
@@ -591,16 +645,28 @@ pub fn create_server(
         let dir = std::path::Path::new(&created.dir);
         let mut props = Properties::load(dir);
         if props.existed() {
+            let is_bedrock = created.server_type == ServerType::Bedrock;
             if let Some(port) = pick_free_port(&db) {
                 props.set("server-port", &port.to_string());
-                props.set("query.port", &port.to_string());
-                props.set("rcon.port", &(port + 10).to_string());
+                // Bedrock has no query protocol and no RCON at all — only
+                // Java's server.properties has these keys.
+                if !is_bedrock {
+                    props.set("query.port", &port.to_string());
+                    props.set("rcon.port", &(port + 10).to_string());
+                }
             }
+            // "level-seed" is the same key on both editions.
             if let Some(s) = spec.seed.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 props.set("level-seed", s);
             }
             if let Some(g) = spec.gamemode.as_deref() {
-                if ["survival", "creative", "adventure", "spectator"].contains(&g) {
+                // Bedrock has no "spectator" game mode.
+                let valid: &[&str] = if is_bedrock {
+                    &["survival", "creative", "adventure"]
+                } else {
+                    &["survival", "creative", "adventure", "spectator"]
+                };
+                if valid.contains(&g) {
                     props.set("gamemode", g);
                 }
             }
@@ -609,8 +675,11 @@ pub fn create_server(
                     props.set("difficulty", d);
                 }
             }
+            // Bedrock's equivalent of Java's "motd" is a differently-named
+            // key, "server-name" — and it's a single plain string, no
+            // §-colour-code formatting like Java's MOTD supports.
             if let Some(m) = spec.motd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                props.set("motd", m);
+                props.set(if is_bedrock { "server-name" } else { "motd" }, m);
             }
             if let Some(mp) = spec.max_players.filter(|n| (1..=1000).contains(n)) {
                 props.set("max-players", &mp.to_string());
@@ -631,7 +700,110 @@ pub fn create_server(
         })
         .map_err(|e| e.to_string())?;
 
+    crate::attribution::stamp(&db, &rec.path, "created");
+
     // seed a fresh idle runtime entry so the sidebar shows it immediately
+    let _ = procs.snapshot(&rec.id);
+    let _ = app.emit("provision:done", &rec);
+    Ok(rec)
+}
+
+// --- modpacks ---------------------------------------------------------------
+
+/// Search Modrinth modpacks by name — thin wrapper so the wizard doesn't
+/// need the full mod/plugin search machinery (loader facets, install
+/// tracking) that `modrinth_search` carries.
+#[tauri::command]
+pub fn modpack_search(query: String) -> Result<Vec<serde_json::Value>, String> {
+    let url = format!(
+        "https://api.modrinth.com/v2/search?query={}&facets=[[\"project_type:modpack\"]]&limit=20&index={}",
+        urlencoding_lite(&query),
+        if query.is_empty() { "downloads" } else { "relevance" },
+    );
+    let resp: serde_json::Value = ureq::get(&url)
+        .set("User-Agent", "CraftPanel/0.1 (+https://github.com/) modpack-search")
+        .timeout(std::time::Duration::from_secs(20))
+        .call()
+        .map_err(|e| format!("Modrinth search failed: {e}"))?
+        .into_json()
+        .map_err(|e| format!("Modrinth returned bad JSON: {e}"))?;
+    Ok(resp["hits"].as_array().cloned().unwrap_or_default())
+}
+
+/// Extremely small percent-encoder — just enough for a search query string,
+/// so this doesn't need to pull in a whole URL crate for one call site.
+fn urlencoding_lite(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+                c.to_string()
+            } else {
+                format!("%{:02X}", c as u32)
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn modpack_info(project_id: String) -> Result<provision::ModpackInfo, String> {
+    provision::modpack_info(&project_id)
+}
+
+#[tauri::command]
+pub fn create_server_from_modpack(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    spec: provision::ModpackSpec,
+) -> Result<ServerRecord, String> {
+    if std::path::Path::new(&spec.dir).exists()
+        && std::fs::read_dir(&spec.dir)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
+        return Err("Pick an empty or new folder for the server.".into());
+    }
+    if !spec.accept_eula {
+        return Err("You must accept the Minecraft EULA to create a server.".into());
+    }
+
+    let app2 = app.clone();
+    let created = provision::create_from_modpack(&spec, &move |p| {
+        let _ = app2.emit("provision:progress", &p);
+    })?;
+
+    // Only touch the port — everything else about the pack's config is
+    // whatever the pack's overrides/first-boot produced. Two servers can't
+    // share a port even if the pack's own server.properties assumes 25565.
+    {
+        let dir = std::path::Path::new(&created.dir);
+        let mut props = Properties::load(dir);
+        if props.existed() {
+            if let Some(port) = pick_free_port(&db) {
+                props.set("server-port", &port.to_string());
+                if created.server_type != ServerType::Bedrock {
+                    props.set("query.port", &port.to_string());
+                    props.set("rcon.port", &(port + 10).to_string());
+                }
+                let _ = props.save();
+            }
+        }
+    }
+
+    let rec = db
+        .insert_server(NewServer {
+            name: spec.name.clone(),
+            path: created.dir.clone(),
+            server_type: created.server_type,
+            launch_target: created.launch_target.clone(),
+            mc_version: Some(created.mc_version.clone()),
+            java_path: spec.java_path.clone().unwrap_or_else(|| "java".to_string()),
+            ram_mb: spec.ram_mb,
+        })
+        .map_err(|e| e.to_string())?;
+
+    crate::attribution::stamp(&db, &rec.path, "created");
+
     let _ = procs.snapshot(&rec.id);
     let _ = app.emit("provision:done", &rec);
     Ok(rec)
@@ -649,7 +821,7 @@ pub struct ApplyResult {
 #[tauri::command]
 pub fn get_settings(db: State<Db>, id: String) -> Result<ServerSettings, String> {
     let rec = load(&db, &id)?;
-    Ok(settings::read(&rec.path))
+    Ok(settings::read(&rec.path, rec.server_type))
 }
 
 #[tauri::command]
@@ -740,6 +912,20 @@ pub fn backup_now(
 pub fn list_backups(db: State<Db>, id: String) -> Result<Vec<Backup>, String> {
     let rec = load(&db, &id)?;
     Ok(backups::list(std::path::Path::new(&rec.path)))
+}
+
+/// This server's backups already pushed to R2 (via Schedule.cloud_backup),
+/// read from that server's remote index — no zips downloaded, no R2 call at
+/// all if it isn't configured.
+#[tauri::command]
+pub fn cloud_backups(
+    cloud: State<Arc<CloudManager>>,
+    id: String,
+) -> Result<Vec<Backup>, String> {
+    if !cloud.is_configured() {
+        return Ok(Vec::new());
+    }
+    cloud.cloud_backups(&id)
 }
 
 #[tauri::command]
@@ -1304,9 +1490,34 @@ pub fn app_settings_set(db: State<Db>, settings: AppSettings) -> Result<(), Stri
 }
 
 #[tauri::command]
+pub fn doctor_check(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    cloud: State<Arc<CloudManager>>,
+) -> Result<crate::doctor::DoctorReport, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(crate::doctor::run(&db, &cloud, &dir))
+}
+
+#[tauri::command]
 pub fn check_update(db: State<Db>) -> crate::updater::UpdateCheck {
     let repo = read_app_settings(&db).github_repo;
     crate::updater::check(if repo.is_empty() { None } else { Some(&repo) })
+}
+
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle, db: State<'_, Db>) -> Result<(), String> {
+    let repo = read_app_settings(&db).github_repo;
+    crate::updater::install(&app, if repo.is_empty() { None } else { Some(&repo) }).await
+}
+
+/// This install's id — the same value stamped into every server's
+/// `.craftpanel-meta.json` (see `attribution.rs`). Surfaced in Settings →
+/// About so it's not just a silent dotfile: the person running the app can
+/// see exactly what it is and what it's for.
+#[tauri::command]
+pub fn app_install_id(db: State<Db>) -> String {
+    crate::attribution::install_id(&db)
 }
 
 // --- Stage 11: Bedrock cross-play (Geyser) --------------------------------

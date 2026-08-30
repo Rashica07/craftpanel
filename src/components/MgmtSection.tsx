@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { MgmtStatus } from "../types";
 import { Badge, Button, Card } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 export function MgmtSection({
   serverId,
@@ -71,11 +72,7 @@ export function MgmtSection({
           </Button>
         )}
       </div>
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
     </Card>
   );
 }

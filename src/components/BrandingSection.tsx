@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Button, Card } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 const COLORS: Record<string, string> = {
   "0": "#000000", "1": "#0000AA", "2": "#00AA00", "3": "#00AAAA",
@@ -171,11 +172,7 @@ export function BrandingSection({ serverId }: { serverId: string }) {
       </p>
 
       {note && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{note}</div>}
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
     </Card>
   );
 }

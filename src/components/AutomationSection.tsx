@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Schedule } from "../types";
 import { Button, Card } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 const EMPTY: Schedule = {
   restartOnCrash: false,
@@ -10,6 +11,8 @@ const EMPTY: Schedule = {
   restartWarningSecs: 60,
   timedCommands: [],
   backupOnStop: false,
+  intervalBackupHours: null,
+  cloudBackup: false,
 };
 
 export function AutomationSection({ serverId }: { serverId: string }) {
@@ -121,6 +124,43 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         </span>
       </label>
 
+      <label className="mt-2.5 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={sch.intervalBackupHours != null}
+          onChange={(e) => set("intervalBackupHours", e.target.checked ? 6 : null)}
+          className="accent-accent"
+        />
+        <span className="flex-1">Also back up automatically every</span>
+        <input
+          type="number"
+          min={1}
+          max={168}
+          disabled={sch.intervalBackupHours == null}
+          value={sch.intervalBackupHours ?? 6}
+          onChange={(e) => set("intervalBackupHours", Number(e.target.value) || 6)}
+          className="w-14 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink disabled:opacity-40"
+        />
+        <span className="text-2xs text-ink-faint">hours, while running</span>
+      </label>
+
+      <label className="mt-2.5 flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={sch.cloudBackup}
+          onChange={(e) => set("cloudBackup", e.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span>
+          Also push every scheduled backup to the cloud
+          <span className="mt-0.5 block text-2xs text-ink-faint">
+            Needs Cloud sync (R2) set up in CraftPanel settings — silently
+            skipped otherwise. Off-machine, in case this computer's disk
+            goes with it.
+          </span>
+        </span>
+      </label>
+
       <div className="mt-3 border-t border-line pt-2">
         <div className="mb-1 text-2xs uppercase tracking-wide text-ink-faint">
           Timed commands
@@ -180,11 +220,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         </Button>
         {note && <span className="text-2xs text-ink-dim">{note}</span>}
       </div>
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
     </Card>
   );
 }

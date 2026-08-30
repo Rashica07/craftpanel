@@ -181,6 +181,14 @@ pub fn list(dir: &Path) -> Vec<Backup> {
     out
 }
 
+/// Read a backup's zip bytes off disk — used when pushing it to cloud
+/// storage (`cloud.rs::push_backup`). Local backups are the source of
+/// truth; the cloud copy is only ever made from one that already exists.
+pub fn read_zip(dir: &Path, id: &str) -> Result<Vec<u8>, String> {
+    let id = sanitize_id(id)?;
+    fs::read(backup_root(dir).join(format!("{id}.zip"))).map_err(|e| e.to_string())
+}
+
 pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
     let id = sanitize_id(id)?;
     let root = backup_root(dir);

@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CraftPanel",
   "mainBinaryName": "craftpanel",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "identifier": "com.craftpanel.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,6 +27,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,6 +42,14 @@
     },
     "macOS": {
       "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFNTIwQUFENDVBMDRGMzcKUldRM1Q2QkZyUXBTWHZTaFBkOU5jMUhtRmE4UnVnQjRYN2E4Njdkalp3R3ROQ1Q3T2o2dGQzWTcK",
+      "endpoints": [
+        "https://github.com/Rashica07/craftpanel/releases/latest/download/latest.json"
+      ]
     }
   }
 }

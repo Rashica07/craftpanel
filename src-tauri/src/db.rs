@@ -156,6 +156,15 @@ impl Db {
         Ok(())
     }
 
+    pub fn update_java_path(&self, id: &str, java_path: &str) -> rusqlite::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE servers SET java_path = ?2 WHERE id = ?1",
+            params![id, java_path],
+        )?;
+        Ok(())
+    }
+
     pub fn set_jvm_args(&self, id: &str, jvm_args: Option<&str>) -> rusqlite::Result<()> {
         let conn = self.0.lock().unwrap();
         conn.execute(
@@ -225,6 +234,7 @@ fn type_str(t: ServerType) -> &'static str {
         ServerType::Paper => "paper",
         ServerType::Spigot => "spigot",
         ServerType::Vanilla => "vanilla",
+        ServerType::Bedrock => "bedrock",
     }
 }
 
@@ -234,6 +244,7 @@ fn type_from_str(s: &str) -> ServerType {
         "forge" => ServerType::Forge,
         "paper" => ServerType::Paper,
         "spigot" => ServerType::Spigot,
+        "bedrock" => ServerType::Bedrock,
         _ => ServerType::Vanilla,
     }
 }

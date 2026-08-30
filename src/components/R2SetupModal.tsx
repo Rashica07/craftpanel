@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { Button, Field, IconButton, TextInput, useDismissOnEscape } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 export function R2SetupModal({
   onClose,
@@ -83,11 +84,7 @@ export function R2SetupModal({
             machine except to talk to R2.
           </p>
 
-          {error && (
-            <div className="rounded-md border border-bad/30 bg-bad-muted px-3 py-2 text-xs text-bad-soft">
-              {error}
-            </div>
-          )}
+          <ErrorBanner message={error} />
         </div>
 
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { JvmInfo } from "../types";
 import { Button, Card } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 export function JvmSection({
   serverId,
@@ -108,11 +109,7 @@ export function JvmSection({
         </pre>
       )}
       {note && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{note}</div>}
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
     </Card>
   );
 }

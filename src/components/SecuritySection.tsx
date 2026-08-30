@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AntiCheatAdvice, Suspicion } from "../types";
 import { Badge, Card, IconButton } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 export function SecuritySection({ serverId }: { serverId: string }) {
   const [advice, setAdvice] = useState<AntiCheatAdvice | null>(null);
@@ -98,11 +99,7 @@ export function SecuritySection({ serverId }: { serverId: string }) {
           Heuristic only — movement kicks and re-joins have innocent causes too.
         </p>
       </div>
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
     </Card>
   );
 }

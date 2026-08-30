@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::adapter::ServerType;
 use crate::properties::Properties;
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +125,49 @@ const ADVANCED: &[Spec] = &[
     s("region-file-compression", "Region file compression", "enum", COMPRESSION, "deflate", None),
 ];
 
+// --- Bedrock ----------------------------------------------------------------
+// Keys and defaults confirmed against the actual server.properties shipped
+// inside Mojang's real bedrock-server zip (2026-08-30) — not guessed. A
+// handful of fields that plausibly have more valid values than observed
+// (compression-algorithm, chat-restriction) are left as free text rather
+// than a guessed-at enum, so a legitimate value never gets silently hidden.
+
+const BEDROCK_GAMEMODE: &[&str] = &["survival", "creative", "adventure"]; // no "spectator"
+const BEDROCK_PERMISSION: &[&str] = &["visitor", "member", "operator"];
+
+const BEDROCK_COMMON: &[Spec] = &[
+    s("server-name", "Server name", "text", &[], "Dedicated Server", None),
+    s("gamemode", "Default game mode", "enum", BEDROCK_GAMEMODE, "survival", None),
+    s("difficulty", "Difficulty", "enum", DIFFICULTY, "easy", None),
+    s("max-players", "Max players", "int", &[], "10", None),
+    s("allow-cheats", "Allow cheats", "bool", &[], "false",
+      Some("Lets players use commands and cheats in-world.")),
+    s("online-mode", "Xbox Live authentication", "bool", &[], "true",
+      Some("Off lets anyone connect without an Xbox Live account. Internet-facing servers should leave this on.")),
+    s("allow-list", "Allowlist only", "bool", &[], "true",
+      Some("When on, only players in allowlist.json can join.")),
+    s("level-seed", "Level seed", "text", &[], "",
+      Some("Only used when generating a new world.")),
+];
+
+const BEDROCK_ADVANCED: &[Spec] = &[
+    s("view-distance", "View distance (chunks)", "int", &[], "32", None),
+    s("tick-distance", "Simulation distance (chunks)", "int", &[], "4",
+      Some("How far entities/redstone/crops actually tick.")),
+    s("player-idle-timeout", "Idle kick (minutes)", "int", &[], "30",
+      Some("0 = never kick idle players.")),
+    s("max-threads", "Max worker threads", "int", &[], "8", None),
+    s("default-player-permission-level", "Default permission level", "enum", BEDROCK_PERMISSION, "member", None),
+    s("texturepack-required", "Require the resource pack", "bool", &[], "false", None),
+    s("content-log-file-enabled", "Write a content log file", "bool", &[], "false", None),
+    s("compression-threshold", "Compression threshold", "int", &[], "1", None),
+    s("compression-algorithm", "Compression algorithm", "text", &[], "zlib", None),
+    s("chat-restriction", "Chat restriction", "text", &[], "None",
+      Some("None, Dropped, or Disabled.")),
+    s("disable-player-interaction", "Disable player-to-player interaction", "bool", &[], "false", None),
+    s("server-portv6", "IPv6 port", "int", &[], "19133", None),
+];
+
 fn field(props: &Properties, spec: &Spec) -> SettingField {
     let value = props.get(spec.key).unwrap_or_else(|| spec.default.to_string());
     let note = if spec.key == "online-mode" && value == "false" {
@@ -142,7 +186,7 @@ fn field(props: &Properties, spec: &Spec) -> SettingField {
     }
 }
 
-pub fn read(server_dir: &str) -> ServerSettings {
+pub fn read(server_dir: &str, server_type: ServerType) -> ServerSettings {
     let props = Properties::load(Path::new(server_dir));
     if !props.existed() {
         return ServerSettings {
@@ -152,10 +196,15 @@ pub fn read(server_dir: &str) -> ServerSettings {
             all: Vec::new(),
         };
     }
+    let (common, advanced) = if server_type.is_bedrock() {
+        (BEDROCK_COMMON, BEDROCK_ADVANCED)
+    } else {
+        (COMMON, ADVANCED)
+    };
     ServerSettings {
         present: true,
-        common: COMMON.iter().map(|s| field(&props, s)).collect(),
-        advanced: ADVANCED.iter().map(|s| field(&props, s)).collect(),
+        common: common.iter().map(|s| field(&props, s)).collect(),
+        advanced: advanced.iter().map(|s| field(&props, s)).collect(),
         all: props.entries(),
     }
 }
@@ -203,7 +252,7 @@ mod tests {
     #[test]
     fn reads_common_advanced_and_flags_offline_mode() {
         let dir = dir_with("online-mode=false\ndifficulty=hard\nsimulation-distance=6\n");
-        let s = read(&dir);
+        let s = read(&dir, ServerType::Paper);
         assert!(s.present);
         let om = s.common.iter().find(|f| f.key == "online-mode").unwrap();
         assert_eq!(om.value, "false");
@@ -211,6 +260,23 @@ mod tests {
         let sim = s.advanced.iter().find(|f| f.key == "simulation-distance").unwrap();
         assert_eq!(sim.value, "6");
         assert!(sim.help.is_some());
+    }
+
+    #[test]
+    fn bedrock_gets_bedrock_shaped_fields_not_java_ones() {
+        let dir = dir_with("server-name=My Realm\ngamemode=creative\nallow-cheats=true\n");
+        let s = read(&dir, ServerType::Bedrock);
+        assert!(s.present);
+        // real Bedrock keys show up, with the actual values read
+        let name = s.common.iter().find(|f| f.key == "server-name").unwrap();
+        assert_eq!(name.value, "My Realm");
+        let gm = s.common.iter().find(|f| f.key == "gamemode").unwrap();
+        assert_eq!(gm.value, "creative");
+        // no "spectator" offered — not a real Bedrock game mode
+        assert!(!gm.options.contains(&"spectator"));
+        // Java-only keys are absent entirely, not just empty
+        assert!(s.common.iter().all(|f| f.key != "motd" && f.key != "pvp"));
+        assert!(s.advanced.iter().all(|f| f.key != "query.port" && f.key != "level-type"));
     }
 
     #[test]

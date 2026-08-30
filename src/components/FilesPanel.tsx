@@ -14,6 +14,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 function size(n: number) {
@@ -166,11 +167,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
             </div>
           </>
         )}
-        {error && (
-          <Banner tone="bad" className="mt-2" onDismiss={() => setError(null)}>
-            {error}
-          </Banner>
-        )}
+        <ErrorBanner message={error} onDismiss={() => setError(null)} className="mt-2" />
       </div>
     );
   }
@@ -226,11 +223,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
           {note}
         </Banner>
       )}
-      {error && (
-        <Banner tone="bad" className="mb-2" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-2" />
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line-soft bg-surface shadow-e1">
         {!listing ? (

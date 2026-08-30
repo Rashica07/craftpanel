@@ -14,6 +14,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 function size(n: number) {
@@ -235,11 +236,7 @@ export function WorldsPanel({
         </Button>
       </Card>
 
-      {error && (
-        <Banner tone="bad" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       {/* In-app dialogs: window.prompt() is a no-op in Tauri's WKWebView, so
           the old browser prompts silently did nothing on macOS. */}

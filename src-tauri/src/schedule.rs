@@ -32,6 +32,14 @@ pub struct Schedule {
     pub timed_commands: Vec<TimedCommand>,
     /// take a backup (trigger = "scheduled") every time the server stops cleanly
     pub backup_on_stop: bool,
+    /// also take a backup every N hours while the server is running, on top
+    /// of (not instead of) `backup_on_stop` — a server that never stops
+    /// otherwise never gets backed up. `None`/`0` = off.
+    pub interval_backup_hours: Option<u32>,
+    /// push every backup this schedule takes (either trigger) to R2, once
+    /// it's uploaded locally. Silently skipped if R2 isn't configured —
+    /// this is a bonus on top of local backups, never a hard requirement.
+    pub cloud_backup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +56,8 @@ impl Schedule {
             && self.daily_restart.is_none()
             && self.timed_commands.is_empty()
             && !self.backup_on_stop
+            && self.interval_backup_hours.unwrap_or(0) == 0
+            && !self.cloud_backup
     }
     fn max_restarts(&self) -> u32 {
         if self.max_crash_restarts == 0 { 3 } else { self.max_crash_restarts }
@@ -105,6 +115,10 @@ struct DayState {
     warned: Option<i64>,
     /// last status we saw, to catch the running -> stopped transition
     last_status: Option<ServerStatus>,
+    /// unix epoch of the last interval backup — 0 means "never" (also true
+    /// right after an app restart, since this is in-memory only, same as
+    /// every other tracker in this struct)
+    last_interval_backup: i64,
 }
 
 pub struct Scheduler {
@@ -147,6 +161,65 @@ impl Scheduler {
         );
     }
 
+    /// Take a local backup, prune locally, then — if `cloud_backup` is on
+    /// and R2 is configured — push it and prune the remote index too.
+    /// Runs on its own thread so a slow zip/upload never blocks the ticker.
+    fn run_backup(&self, id: &str, dir: &str, trigger: &str, cloud_backup: bool) {
+        let dir = dir.to_string();
+        let id = id.to_string();
+        let trigger = trigger.to_string();
+        let app = self.app.clone();
+        std::thread::spawn(move || {
+            let p = std::path::Path::new(&dir);
+            let keep = app
+                .try_state::<Db>()
+                .and_then(|db| db.get_setting("backups.keep").ok().flatten())
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(20);
+            match crate::backups::backup_now(p, Some(&trigger), "scheduled", &|_| {}) {
+                Ok(meta) => {
+                    crate::backups::prune(p, keep);
+                    let _ = app.emit(
+                        "server:log",
+                        serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                            "text": "[scheduler] scheduled backup done" }),
+                    );
+                    if cloud_backup {
+                        if let Some(cloud) = app.try_state::<std::sync::Arc<crate::cloud::CloudManager>>() {
+                            if cloud.is_configured() {
+                                match crate::backups::read_zip(p, &meta.id)
+                                    .and_then(|bytes| cloud.push_backup(&id, &meta, &bytes, keep))
+                                {
+                                    Ok(()) => {
+                                        let _ = app.emit(
+                                            "server:log",
+                                            serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                                                "text": "[scheduler] pushed backup to the cloud" }),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        let _ = app.emit(
+                                            "server:log",
+                                            serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                                                "text": format!("[scheduler] cloud backup push failed: {e}") }),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = app.emit(
+                        "server:log",
+                        serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                            "text": format!("[scheduler] scheduled backup failed: {e}") }),
+                    );
+                }
+            }
+        });
+    }
+
     fn tick(&self) {
         let Some(db) = self.app.try_state::<Db>() else { return };
         let Some(procs) = self.app.try_state::<ProcessManager>() else { return };
@@ -169,33 +242,9 @@ impl Scheduler {
                 && matches!(prev, Some(ServerStatus::Running) | Some(ServerStatus::Stopping))
                 && snap.status == ServerStatus::Stopped
             {
-                let dir = rec.path.clone();
-                let id = rec.id.clone();
                 drop(st);
                 self.console(&rec.id, "server stopped — taking a scheduled backup");
-                let app = self.app.clone();
-                std::thread::spawn(move || {
-                    let p = std::path::Path::new(&dir);
-                    match crate::backups::backup_now(p, Some("on stop"), "scheduled", &|_| {}) {
-                        Ok(_) => {
-                            if let Some(db) = app.try_state::<Db>() {
-                                let keep = db
-                                    .get_setting("backups.keep")
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|s| s.parse().ok())
-                                    .unwrap_or(20usize);
-                                crate::backups::prune(p, keep);
-                            }
-                            let _ = app.emit(
-                                "server:log",
-                                serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
-                                    "text": "[scheduler] scheduled backup done" }),
-                            );
-                        }
-                        Err(_) => {}
-                    }
-                });
+                self.run_backup(&rec.id, &rec.path, "on stop", sch.cloud_backup);
                 continue;
             }
 
@@ -238,6 +287,20 @@ impl Scheduler {
                 snap.status,
                 ServerStatus::Running | ServerStatus::Starting
             );
+
+            // --- interval backup (independent of backup_on_stop) ---
+            if running {
+                if let Some(hours) = sch.interval_backup_hours.filter(|h| *h > 0) {
+                    let interval_secs = hours as i64 * 3600;
+                    if now_epoch - ds.last_interval_backup >= interval_secs {
+                        ds.last_interval_backup = now_epoch;
+                        drop(st);
+                        self.console(&rec.id, &format!("scheduled backup (every {hours}h)"));
+                        self.run_backup(&rec.id, &rec.path, "scheduled", sch.cloud_backup);
+                        continue;
+                    }
+                }
+            }
 
             // --- daily restart with countdown ---
             if running {
@@ -295,6 +358,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn is_default_accounts_for_the_new_backup_fields() {
+        assert!(Schedule::default().is_default());
+        assert!(!Schedule { interval_backup_hours: Some(6), ..Default::default() }.is_default());
+        assert!(!Schedule { cloud_backup: true, ..Default::default() }.is_default());
+        // 0 hours is the same as "off", same as None
+        assert!(Schedule { interval_backup_hours: Some(0), ..Default::default() }.is_default());
+    }
+
+    #[test]
     fn parses_times() {
         assert_eq!(parse_hhmm("04:00"), Some((4, 0)));
         assert_eq!(parse_hhmm("23:59"), Some((23, 59)));
@@ -313,6 +385,8 @@ mod tests {
             restart_on_crash: true,
             daily_restart: Some("04:30".into()),
             backup_on_stop: true,
+            interval_backup_hours: Some(12),
+            cloud_backup: true,
             timed_commands: vec![TimedCommand { at: "03:00".into(), command: "save-all".into() }],
             ..Default::default()
         };
@@ -321,6 +395,8 @@ mod tests {
         assert!(back.restart_on_crash);
         assert_eq!(back.daily_restart.as_deref(), Some("04:30"));
         assert_eq!(back.timed_commands.len(), 1);
+        assert_eq!(back.interval_backup_hours, Some(12));
+        assert!(back.cloud_backup);
 
         s.daily_restart = Some("99:99".into());
         assert!(write(&db, "srv1", &s).is_err());

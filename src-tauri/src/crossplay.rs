@@ -33,7 +33,11 @@ fn platform(t: ServerType) -> Option<&'static str> {
         ServerType::Fabric => Some("fabric"),
         // NeoForge is stored as Forge in the DB; Geyser has a neoforge build.
         ServerType::Forge => Some("neoforge"),
-        ServerType::Vanilla => None,
+        // Vanilla has no plugin loader to install Geyser into. A native
+        // Bedrock server doesn't need a Bedrock *bridge* — it already speaks
+        // Bedrock — so this panel simply doesn't apply and isn't shown for
+        // one (see ServerDetail's tab list).
+        ServerType::Vanilla | ServerType::Bedrock => None,
     }
 }
 

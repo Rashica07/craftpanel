@@ -4,13 +4,13 @@ import {
   LOADER_META,
   type CreateSpec,
   type Loader,
+  type ModpackHit,
   type ProvisionProgress,
   type ServerRecord,
   type VersionInfo,
 } from "../types";
 import {
   Badge,
-  Banner,
   Button,
   Checkbox,
   Field,
@@ -22,13 +22,14 @@ import {
   Tooltip,
   cx,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 import { LoaderMark } from "./LoaderMark";
 import { LogoMark } from "./Logo";
 import { RamSlider } from "./RamSlider";
 import { createPortal } from "react-dom";
 
-const LOADERS: Loader[] = ["paper", "vanilla", "fabric", "neoforge", "forge"];
+const LOADERS: Loader[] = ["paper", "vanilla", "fabric", "neoforge", "forge", "bedrock"];
 
 /** Plain-language "why would I pick this?" — LOADER_META's blurb is terser. */
 const LOADER_PITCH: Record<Loader, string> = {
@@ -37,7 +38,14 @@ const LOADER_PITCH: Record<Loader, string> = {
   fabric: "Light and quick to update — the usual choice for modpacks.",
   neoforge: "The actively developed Forge. Use it for newer modpacks.",
   forge: "The classic mod loader. Use it if your modpack says Forge.",
+  bedrock: "For phone, console & Windows-edition players — a different game underneath, so no Java mods or plugins here.",
 };
+
+/** Bedrock Dedicated Server has no macOS build — never has. Windows and
+ * Linux only, confirmed against Mojang's own download API. */
+function bedrockSupportedHere(): boolean {
+  return document.documentElement.dataset.os !== "mac";
+}
 
 const GAMEMODES = [
   { v: "survival", icon: "heart", label: "Survival", hint: "Hunger, mobs, the works" },
@@ -70,11 +78,13 @@ function deriveMcVersion(loader: Loader, versionId: string): string {
 /* ── step rail ─────────────────────────────────────────────────────────── */
 
 const STEPS = ["Flavour", "Version", "Your world", "Ready"];
+const MODPACK_STEPS = ["Flavour", "Modpack", "Your world", "Ready"];
 
-function StepRail({ step }: { step: number }) {
+function StepRail({ step, modpackMode }: { step: number; modpackMode: boolean }) {
+  const labels = modpackMode ? MODPACK_STEPS : STEPS;
   return (
     <ol className="flex items-center gap-1.5">
-      {STEPS.map((s, i) => {
+      {labels.map((s, i) => {
         const done = i < step;
         const now = i === step;
         return (
@@ -103,7 +113,7 @@ function StepRail({ step }: { step: number }) {
               </span>
               {s}
             </span>
-            {i < STEPS.length - 1 && (
+            {i < labels.length - 1 && (
               <span
                 className={cx(
                   "h-px w-3",
@@ -179,6 +189,33 @@ export function CreateServerModal({
   const [progress, setProgress] = useState<ProvisionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Modpacks are a different flow entirely — the pack dictates its own
+  // loader + Minecraft version, so there's no version-picker step and no
+  // world & rules step (the pack's own overrides cover that ground).
+  const [modpackMode, setModpackMode] = useState(false);
+  const [packQuery, setPackQuery] = useState("");
+  const [packResults, setPackResults] = useState<ModpackHit[] | null>(null);
+  const [packSearching, setPackSearching] = useState(false);
+  const [packError, setPackError] = useState<string | null>(null);
+  const [pickedPack, setPickedPack] = useState<ModpackHit | null>(null);
+
+  function runPackSearch(query: string) {
+    setPackSearching(true);
+    setPackError(null);
+    api
+      .modpackSearch(query)
+      .then(setPackResults)
+      .catch((e) => setPackError(String(e)))
+      .finally(() => setPackSearching(false));
+  }
+
+  useEffect(() => {
+    if (!modpackMode || step !== 1) return;
+    const t = setTimeout(() => runPackSearch(packQuery), packQuery ? 350 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modpackMode, step, packQuery]);
+
   // fetch versions when entering step 1 / changing loader
   useEffect(() => {
     if (step !== 1) return;
@@ -190,6 +227,13 @@ export function CreateServerModal({
       .then(setVersions)
       .catch((e) => setVersionsError(String(e)));
   }, [step, loader]);
+
+  // Bedrock skips the version-picker step entirely (there's nothing to pick
+  // — see LOADER_PITCH/deriveMcVersion), so it needs its placeholder version
+  // id set as soon as it's chosen, not only on arriving at step 1.
+  useEffect(() => {
+    if (loader === "bedrock") setVersionId("current");
+  }, [loader]);
 
   const visibleVersions = useMemo(() => {
     if (!versions) return [];
@@ -238,24 +282,32 @@ export function CreateServerModal({
     setCreating(true);
     setError(null);
     setProgress({ stage: "start", message: "Getting started…", pct: 0 });
-    const spec: CreateSpec = {
-      loader,
-      mc_version: deriveMcVersion(loader, versionId),
-      loader_version:
-        loader === "neoforge" || loader === "forge" ? versionId : null,
-      dir: finalDir,
-      name: name.trim() || safeName,
-      ram_mb: ram,
-      java_path: null,
-      accept_eula: agree,
-      seed: seed.trim() || null,
-      gamemode,
-      difficulty,
-      motd: motd.trim() || null,
-      max_players: maxPlayers,
-    };
     try {
-      const rec = await api.createServer(spec);
+      const rec = modpackMode
+        ? await api.createServerFromModpack({
+            project_id: pickedPack!.project_id,
+            dir: finalDir,
+            name: name.trim() || safeName,
+            ram_mb: ram,
+            java_path: null,
+            accept_eula: agree,
+          })
+        : await api.createServer({
+            loader,
+            mc_version: deriveMcVersion(loader, versionId),
+            loader_version:
+              loader === "neoforge" || loader === "forge" ? versionId : null,
+            dir: finalDir,
+            name: name.trim() || safeName,
+            ram_mb: ram,
+            java_path: null,
+            accept_eula: agree,
+            seed: seed.trim() || null,
+            gamemode,
+            difficulty,
+            motd: motd.trim() || null,
+            max_players: maxPlayers,
+          } satisfies CreateSpec);
       onCreated(rec);
     } catch (e) {
       setError(String(e));
@@ -267,7 +319,9 @@ export function CreateServerModal({
     step === 0
       ? true
       : step === 1
-        ? !!versionId
+        ? modpackMode
+          ? !!pickedPack
+          : !!versionId
         : step === 2
           ? !!parentDir && !!name.trim()
           : agree;
@@ -295,7 +349,7 @@ export function CreateServerModal({
             </h2>
             {!creating && (
               <div className="mt-1.5">
-                <StepRail step={step} />
+                <StepRail step={step} modpackMode={modpackMode} />
               </div>
             )}
           </div>
@@ -308,14 +362,24 @@ export function CreateServerModal({
             /* ── provisioning ───────────────────────────────────── */
             <div className="space-y-4 py-6 text-center">
               <div className="flex justify-center">
-                <LoaderMark loader={loader} size={52} />
+                {modpackMode && pickedPack?.icon_url ? (
+                  <img
+                    src={pickedPack.icon_url}
+                    alt=""
+                    className="h-[52px] w-[52px] rounded-lg border border-line-soft object-cover"
+                  />
+                ) : (
+                  <LoaderMark loader={loader} size={52} />
+                )}
               </div>
               <div>
                 <div className="font-display text-base font-semibold text-ink">
                   {progress?.message ?? "Working…"}
                 </div>
                 <p className="mt-1 text-xs text-ink-faint">
-                  {LOADER_META[loader].label} {mcVersion} → {safeName}
+                  {modpackMode
+                    ? `${pickedPack?.title ?? "Modpack"} → ${safeName}`
+                    : `${LOADER_META[loader].label} ${mcVersion} → ${safeName}`}
                 </p>
               </div>
               <ProgressBar
@@ -328,13 +392,13 @@ export function CreateServerModal({
                 of minutes on a first run. You can leave this window open —
                 closing CraftPanel now would cancel it.
               </p>
-              {error && (
-                <Banner tone="bad" className="text-left">
-                  <div className="break-words">{error}</div>
+              <ErrorBanner
+                message={error}
+                className="text-left"
+                actions={
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="mt-2"
                     onClick={() => {
                       setCreating(false);
                       setError(null);
@@ -342,8 +406,8 @@ export function CreateServerModal({
                   >
                     Back to the settings
                   </Button>
-                </Banner>
-              )}
+                }
+              />
             </div>
           ) : step === 0 ? (
             /* ── 1. flavour ─────────────────────────────────────── */
@@ -355,17 +419,25 @@ export function CreateServerModal({
                 people.
               </p>
               {LOADERS.map((l) => {
-                const on = loader === l;
-                return (
+                const on = !modpackMode && loader === l;
+                const macBlocked = l === "bedrock" && !bedrockSupportedHere();
+                const card = (
                   <button
                     key={l}
-                    onClick={() => setLoader(l)}
+                    onClick={() => {
+                    if (macBlocked) return;
+                    setModpackMode(false);
+                    setLoader(l);
+                  }}
+                    disabled={macBlocked}
                     aria-pressed={on}
                     className={cx(
                       "flex w-full items-center gap-3.5 rounded-lg border p-3 text-left transition-colors duration-[120ms] ease-cp",
-                      on
-                        ? "border-accent bg-accent-muted"
-                        : "border-line-soft bg-surface-2 hover:border-line-strong hover:bg-surface-3",
+                      macBlocked
+                        ? "cursor-not-allowed border-line-soft bg-surface-2 opacity-50"
+                        : on
+                          ? "border-accent bg-accent-muted"
+                          : "border-line-soft bg-surface-2 hover:border-line-strong hover:bg-surface-3",
                     )}
                   >
                     <LoaderMark loader={l} size={40} />
@@ -379,24 +451,175 @@ export function CreateServerModal({
                             Recommended
                           </Badge>
                         )}
+                        {macBlocked && (
+                          <Badge tone="neutral" size="sm">
+                            Windows / Linux only
+                          </Badge>
+                        )}
                       </div>
                       <p className="mt-0.5 text-2xs leading-snug text-ink-faint">
-                        {LOADER_PITCH[l]}
+                        {macBlocked
+                          ? "Mojang doesn't build Bedrock Dedicated Server for macOS — there's nothing CraftPanel can install here."
+                          : LOADER_PITCH[l]}
                       </p>
                     </div>
-                    <span
-                      className={cx(
-                        "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition-colors",
-                        on
-                          ? "border-accent bg-accent text-on-accent"
-                          : "border-line",
-                      )}
-                    >
-                      {on && <Icon name="check" size={11} strokeWidth={3} />}
-                    </span>
+                    {!macBlocked && (
+                      <span
+                        className={cx(
+                          "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition-colors",
+                          on
+                            ? "border-accent bg-accent text-on-accent"
+                            : "border-line",
+                        )}
+                      >
+                        {on && <Icon name="check" size={11} strokeWidth={3} />}
+                      </span>
+                    )}
                   </button>
                 );
+                // Bedrock is a different game underneath, not another Java
+                // loader — a divider keeps it from reading as "just another
+                // option in the same list".
+                return l === "bedrock" ? (
+                  <div key="bedrock-group" className="contents">
+                    <div className="cp-rule my-1" />
+                    {card}
+                  </div>
+                ) : (
+                  card
+                );
               })}
+
+              <div className="cp-rule my-1" />
+              <button
+                onClick={() => {
+                  setModpackMode(true);
+                  setPickedPack(null);
+                }}
+                aria-pressed={modpackMode}
+                className={cx(
+                  "flex w-full items-center gap-3.5 rounded-lg border p-3 text-left transition-colors duration-[120ms] ease-cp",
+                  modpackMode
+                    ? "border-accent bg-accent-muted"
+                    : "border-line-soft bg-surface-2 hover:border-line-strong hover:bg-surface-3",
+                )}
+              >
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-soft">
+                  <Icon name="sparkle" size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="font-display text-sm font-semibold text-ink">
+                    Browse a modpack instead
+                  </span>
+                  <p className="mt-0.5 text-2xs leading-snug text-ink-faint">
+                    Skip picking a loader and version by hand — install a
+                    curated pack from Modrinth and CraftPanel sets everything
+                    up to match it.
+                  </p>
+                </div>
+                <span
+                  className={cx(
+                    "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition-colors",
+                    modpackMode
+                      ? "border-accent bg-accent text-on-accent"
+                      : "border-line",
+                  )}
+                >
+                  {modpackMode && <Icon name="check" size={11} strokeWidth={3} />}
+                </span>
+              </button>
+            </div>
+          ) : step === 1 && modpackMode ? (
+            /* ── 2. modpack search ─────────────────────────────── */
+            <div className="space-y-3">
+              <TextInput
+                autoFocus
+                icon="search"
+                value={packQuery}
+                placeholder="Search Modrinth modpacks — try “skyblock” or “vanilla plus”…"
+                onChange={(e) => setPackQuery(e.target.value)}
+              />
+              {packError ? (
+                <StateBlock
+                  state="error"
+                  title="Couldn't reach Modrinth"
+                  message={packError}
+                  onRetry={() => runPackSearch(packQuery)}
+                />
+              ) : packSearching && !packResults ? (
+                <StateBlock state="loading" title="Searching modpacks…" />
+              ) : !packResults || packResults.length === 0 ? (
+                <StateBlock
+                  state="empty"
+                  icon="search"
+                  title={packQuery ? `Nothing called “${packQuery}”` : "Search for a modpack"}
+                  message={
+                    packQuery
+                      ? "Try a shorter search."
+                      : "Popular packs turn up as you type — try “skyblock” or leave it blank for the most-downloaded ones."
+                  }
+                  compact
+                />
+              ) : (
+                <div
+                  role="listbox"
+                  aria-label="Modpack"
+                  className="max-h-80 space-y-1.5 overflow-y-auto pr-1"
+                >
+                  {packResults.map((p) => {
+                    const on = pickedPack?.project_id === p.project_id;
+                    return (
+                      <button
+                        key={p.project_id}
+                        role="option"
+                        aria-selected={on}
+                        onClick={() => setPickedPack(p)}
+                        className={cx(
+                          "flex w-full items-start gap-3 rounded-lg border p-2.5 text-left transition-colors duration-[120ms]",
+                          on
+                            ? "border-accent bg-accent-muted"
+                            : "border-line-soft bg-surface-2 hover:border-line-strong hover:bg-surface-3",
+                        )}
+                      >
+                        {p.icon_url ? (
+                          <img
+                            src={p.icon_url}
+                            alt=""
+                            loading="lazy"
+                            className="h-10 w-10 shrink-0 rounded-md border border-line-soft object-cover"
+                          />
+                        ) : (
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-line-soft bg-surface-3 text-ink-ghost">
+                            <Icon name="package" size={16} />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-ink">{p.title}</div>
+                          <p className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-faint">
+                            {p.description}
+                          </p>
+                        </div>
+                        <span
+                          className={cx(
+                            "mt-1 grid h-[16px] w-[16px] shrink-0 place-items-center rounded-full border transition-colors",
+                            on ? "border-accent bg-accent text-on-accent" : "border-line",
+                          )}
+                        >
+                          {on && <Icon name="check" size={10} strokeWidth={3} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {pickedPack && (
+                <div className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-2xs text-ink-faint">
+                  <Icon name="info" size={12} className="shrink-0" />
+                  CraftPanel installs whichever loader and Minecraft version{" "}
+                  <strong className="text-ink-dim">{pickedPack.title}</strong>{" "}
+                  itself needs — that's decided by the pack, not picked by hand.
+                </div>
+              )}
             </div>
           ) : step === 1 ? (
             /* ── 2. version ─────────────────────────────────────── */
@@ -567,11 +790,15 @@ export function CreateServerModal({
                     )}
                   </div>
                 </Field>
-                <div className="rounded-lg border border-line-soft bg-surface-2 p-3.5">
-                  <RamSlider valueMb={ram} onChange={setRam} />
-                </div>
+                {loader !== "bedrock" && (
+                  <div className="rounded-lg border border-line-soft bg-surface-2 p-3.5">
+                    <RamSlider valueMb={ram} onChange={setRam} />
+                  </div>
+                )}
               </section>
 
+              {!modpackMode && (
+              <>
               <div className="cp-rule" />
 
               <section className="space-y-4">
@@ -703,37 +930,70 @@ export function CreateServerModal({
                 </Field>
 
               </section>
+              </>
+              )}
             </div>
           ) : (
             /* ── 4. ready ───────────────────────────────────────── */
             <div className="space-y-4">
               <div className="rounded-lg border border-line-soft bg-surface-2 p-4">
                 <div className="flex items-center gap-3.5">
-                  <LoaderMark loader={loader} size={44} />
+                  {modpackMode && pickedPack ? (
+                    pickedPack.icon_url ? (
+                      <img
+                        src={pickedPack.icon_url}
+                        alt=""
+                        className="h-11 w-11 shrink-0 rounded-lg border border-line-soft object-cover"
+                      />
+                    ) : (
+                      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line-soft bg-surface-3 text-ink-ghost">
+                        <Icon name="package" size={18} />
+                      </div>
+                    )
+                  ) : (
+                    <LoaderMark loader={loader} size={44} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="cp-display truncate text-base text-ink">
                       {name.trim() || safeName}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge tone="accent">{LOADER_META[loader].label}</Badge>
-                      <Badge tone="neutral">MC {mcVersion}</Badge>
-                      <Badge tone="neutral">
-                        {(ram / 1024).toFixed(ram % 1024 ? 1 : 0)} GB RAM
-                      </Badge>
+                      {modpackMode && pickedPack ? (
+                        <Badge tone="accent" icon="sparkle">
+                          {pickedPack.title}
+                        </Badge>
+                      ) : (
+                        <>
+                          <Badge tone="accent">{LOADER_META[loader].label}</Badge>
+                          {loader === "bedrock" ? (
+                            <Badge tone="neutral">Latest release</Badge>
+                          ) : (
+                            <>
+                              <Badge tone="neutral">MC {mcVersion}</Badge>
+                              <Badge tone="neutral">
+                                {(ram / 1024).toFixed(ram % 1024 ? 1 : 0)} GB RAM
+                              </Badge>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <dl className="mt-4 space-y-1.5 border-t border-line-soft pt-3 text-2xs">
-                  {[
-                    ["Folder", finalDir, "folder"],
-                    [
-                      "World",
-                      `${gamemode} · ${difficulty}${seed ? ` · seed ${seed}` : " · random seed"}`,
-                      "globe",
-                    ],
-                    ["Players", `up to ${maxPlayers}`, "users"],
-                  ].map(([k, v, ic]) => (
+                  {(modpackMode
+                    ? [["Folder", finalDir, "folder"]]
+                    : [
+                        ["Folder", finalDir, "folder"],
+                        [
+                          "World",
+                          `${gamemode} · ${difficulty}${seed ? ` · seed ${seed}` : " · random seed"}`,
+                          "globe",
+                        ],
+                        ["Players", `up to ${maxPlayers}`, "users"],
+                      ]
+                  ).map(([k, v, ic]) => (
                     <div key={k} className="flex gap-2.5">
                       <Icon
                         name={ic}
@@ -768,12 +1028,19 @@ export function CreateServerModal({
                   >
                     Minecraft EULA
                   </a>
-                  . CraftPanel will write <code>eula=true</code> and boot the
-                  server once to generate its files.
+                  .{" "}
+                  {loader === "bedrock"
+                    ? "Bedrock Dedicated Server has no eula.txt of its own — this checkbox is the agreement."
+                    : (
+                      <>
+                        CraftPanel will write <code>eula=true</code> and boot the
+                        server once to generate its files.
+                      </>
+                    )}
                 </span>
               </label>
 
-              {error && <Banner tone="bad">{error}</Banner>}
+              <ErrorBanner message={error} />
             </div>
           )}
         </div>
@@ -785,7 +1052,9 @@ export function CreateServerModal({
               variant="quiet"
               icon={step === 0 ? undefined : "arrow-left"}
               onClick={() =>
-                step === 0 ? onClose() : setStep((s) => (s - 1) as 0)
+                step === 0
+                  ? onClose()
+                  : setStep((s) => (loader === "bedrock" && s === 2 ? 0 : s - 1) as 0)
               }
             >
               {step === 0 ? "Cancel" : "Back"}
@@ -802,7 +1071,9 @@ export function CreateServerModal({
                 size="lg"
                 iconRight="arrow-right"
                 disabled={!canNext}
-                onClick={() => setStep((s) => (s + 1) as 1)}
+                onClick={() =>
+                  setStep((s) => (loader === "bedrock" && s === 0 ? 2 : s + 1) as 1)
+                }
               >
                 Continue
               </Button>

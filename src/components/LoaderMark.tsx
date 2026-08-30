@@ -62,6 +62,16 @@ const MARKS: Record<Loader, { bg: string; fg: string; art: React.ReactNode }> = 
       </>
     ),
   },
+  bedrock: {
+    bg: "#173347",
+    fg: "#7ec4e8",
+    art: (
+      <>
+        <rect x="7" y="7" width="18" height="18" rx="1.5" fill="#2f7ea8" />
+        <path d="M7 13h18M7 19h18M13 7v18M19 7v18" stroke="#173347" strokeWidth="1.4" />
+      </>
+    ),
+  },
 };
 
 export function LoaderMark({

@@ -16,6 +16,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 
 /**
@@ -371,11 +372,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
             <p className="text-2xs text-ink-faint">{tunProgress}</p>
           </div>
         )}
-        {tun.error && (
-          <Banner tone="bad" className="mt-3">
-            {tun.error}
-          </Banner>
-        )}
+        <ErrorBanner message={tun.error} className="mt-3" />
 
         <p className="mt-3 border-t border-line-soft pt-2.5 text-2xs leading-relaxed text-ink-faint">
           It's temporary: the number changes each time you restart it, and it
@@ -596,11 +593,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
         )}
       </Card>
 
-      {error && (
-        <Banner tone="bad" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
     </div>
   );
 }

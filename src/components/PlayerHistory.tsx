@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PlayerStat } from "../types";
-import { Badge, Card, IconButton } from "./ui";
+import { Badge, Card, IconButton, StateBlock } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 function dur(secs: number) {
   const h = Math.floor(secs / 3600);
@@ -48,13 +49,17 @@ export function PlayerHistory({ serverId }: { serverId: string }) {
     >
 
       {error ? (
-        <div className="text-xs text-ink-faint">{error}</div>
+        <ErrorBanner message={error} onRetry={load} />
       ) : !rows ? (
-        <div className="text-xs text-ink-faint">Reading logs…</div>
+        <StateBlock state="loading" title="Reading logs…" compact />
       ) : rows.length === 0 ? (
-        <div className="text-xs text-ink-faint">
-          No joins found in the logs yet.
-        </div>
+        <StateBlock
+          state="empty"
+          icon="clock"
+          title="No joins yet"
+          message="Player history is built from logs/ — it fills in once someone's connected."
+          compact
+        />
       ) : (
         <ul className="space-y-1">
           {rows.map((p) => (

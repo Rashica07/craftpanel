@@ -23,6 +23,10 @@ pub enum ServerType {
     Spigot,
     /// Generic `server.jar` with no mod/plugin loader detected.
     Vanilla,
+    /// Native Bedrock Dedicated Server — not a JVM process at all. See
+    /// `bedrock.rs` for what does and doesn't carry over from the Java
+    /// adapters (no RCON, no `eula.txt`, different world format).
+    Bedrock,
 }
 
 impl ServerType {
@@ -33,12 +37,20 @@ impl ServerType {
             ServerType::Paper => "Paper",
             ServerType::Spigot => "Spigot",
             ServerType::Vanilla => "Vanilla",
+            ServerType::Bedrock => "Bedrock",
         }
     }
 
     /// True if this flavour loads mods from a `mods/` folder (Stage 4).
     pub fn uses_mods_folder(&self) -> bool {
         matches!(self, ServerType::Fabric | ServerType::Forge)
+    }
+
+    /// True for the native Bedrock Dedicated Server — a plain OS process,
+    /// not a JVM. Callers use this to skip everything that assumes `java`:
+    /// heap flags, `-jar`, RCON, `eula.txt`.
+    pub fn is_bedrock(&self) -> bool {
+        matches!(self, ServerType::Bedrock)
     }
 }
 

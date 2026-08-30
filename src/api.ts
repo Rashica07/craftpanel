@@ -1,12 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AdminLists,
   AntiCheatAdvice,
   AppSettings,
   ApplyResult,
   UpdateCheck,
+  DoctorReport,
+  ModpackHit,
+  ModpackInfo,
+  ModpackSpec,
   Backup,
   BackupsConfig,
   CloudStatus,
@@ -155,6 +160,15 @@ export const api = {
   onProvisionProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
     return listen<ProvisionProgress>("provision:progress", (e) => fn(e.payload));
   },
+  modpackSearch(query: string): Promise<ModpackHit[]> {
+    return invoke("modpack_search", { query });
+  },
+  modpackInfo(projectId: string): Promise<ModpackInfo> {
+    return invoke("modpack_info", { projectId });
+  },
+  createServerFromModpack(spec: ModpackSpec): Promise<ServerRecord> {
+    return invoke("create_server_from_modpack", { spec });
+  },
 
   // Stage 4 — settings + mods
   getSettings(id: string): Promise<ServerSettings> {
@@ -189,6 +203,9 @@ export const api = {
   },
   listBackups(id: string): Promise<Backup[]> {
     return invoke("list_backups", { id });
+  },
+  cloudBackups(id: string): Promise<Backup[]> {
+    return invoke("cloud_backups", { id });
   },
   deleteBackup(id: string, backupId: string): Promise<void> {
     return invoke("delete_backup", { id, backupId });
@@ -377,6 +394,38 @@ export const api = {
   },
   checkUpdate(): Promise<UpdateCheck> {
     return invoke("check_update");
+  },
+  installUpdate(): Promise<void> {
+    return invoke("install_update");
+  },
+  onUpdateProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
+    return listen<ProvisionProgress>("update:progress", (e) => fn(e.payload));
+  },
+  relaunchApp(): Promise<void> {
+    return relaunch();
+  },
+  appInstallId(): Promise<string> {
+    return invoke("app_install_id");
+  },
+  doctorCheck(): Promise<DoctorReport> {
+    return invoke("doctor_check");
+  },
+
+  // Java auto-install — Adoptium Temurin, shared across servers.
+  javaOfferableFor(mcVersion: string): Promise<number | null> {
+    return invoke("java_offerable_for", { mcVersion });
+  },
+  javaInstallStatus(feature: number): Promise<JavaInfo | null> {
+    return invoke("java_install_status", { feature });
+  },
+  installJava(feature: number): Promise<JavaInfo> {
+    return invoke("install_java", { feature });
+  },
+  setServerJavaPath(id: string, javaPath: string): Promise<void> {
+    return invoke("set_server_java_path", { id, javaPath });
+  },
+  onJavaInstallProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
+    return listen<ProvisionProgress>("java-install:progress", (e) => fn(e.payload));
   },
 
   // branding + worlds

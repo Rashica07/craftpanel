@@ -17,6 +17,7 @@ import {
   cx,
   toast,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
 import { RamSlider } from "./RamSlider";
 import { ShareSection } from "./ShareSection";
@@ -422,11 +423,7 @@ export function SettingsPanel({
           </Card>
         )}
 
-        {error && (
-          <Banner tone="bad" onDismiss={() => setError(null)}>
-            <span className="break-words">{error}</span>
-          </Banner>
-        )}
+        <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
         {/* ── where it lives ────────────────────────────────────────── */}
         <Card title="On disk" icon="folder" pad={false}>

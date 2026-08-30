@@ -8,6 +8,7 @@ import {
 import { api } from "../api";
 import type { LogLine } from "../types";
 import { Badge, Button, IconButton, Kbd, TextInput, cx } from "./ui";
+import { CommandInput } from "./CommandInput";
 import { Icon } from "./Icon";
 
 /**
@@ -82,7 +83,6 @@ export function ConsoleView({
   const [pinned, setPinned] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -321,26 +321,26 @@ export function ConsoleView({
 
       {/* ── command line ──────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center gap-2 border-t border-line-soft bg-surface-2 px-3 py-2">
-        <span
-          className={cx(
-            "select-none font-mono text-xs",
-            canSend ? "text-accent" : "text-ink-ghost",
-          )}
-        >
-          ›
-        </span>
-        <input
-          ref={inputRef}
+        <CommandInput
           value={input}
-          disabled={!canSend}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={setInput}
           onKeyDown={onKeyDown}
+          disabled={!canSend}
           placeholder={
             canSend
               ? "Type a command — try  say hello  or  time set day"
               : "Start the server to send commands"
           }
-          className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-ghost disabled:cursor-not-allowed"
+          prefix={
+            <span
+              className={cx(
+                "select-none font-mono text-xs",
+                canSend ? "text-accent" : "text-ink-ghost",
+              )}
+            >
+              ›
+            </span>
+          }
         />
         {canSend && history.length > 0 && !input && (
           <span className="hidden shrink-0 items-center gap-1 text-2xs text-ink-ghost sm:flex">

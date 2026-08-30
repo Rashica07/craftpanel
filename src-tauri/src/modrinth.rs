@@ -34,6 +34,9 @@ pub struct Hit {
     pub compatible: bool,
     /// "required" | "optional" | "unsupported" | "unknown"
     pub server_side: String,
+    /// same scale, but for the *player's* client — "required" means anyone
+    /// joining needs this installed too, not just the server.
+    pub client_side: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +99,8 @@ struct RawHit {
     versions: Vec<String>,
     #[serde(default)]
     server_side: Option<String>,
+    #[serde(default)]
+    client_side: Option<String>,
 }
 #[derive(Deserialize)]
 struct RawVersion {
@@ -150,6 +155,10 @@ pub fn loader_facet(t: ServerType) -> &'static str {
         ServerType::Paper => "paper",
         ServerType::Spigot => "spigot",
         ServerType::Vanilla => "datapack",
+        // Never actually called: the Add-ons tab is hidden entirely for
+        // Bedrock servers (no Modrinth mod/plugin ecosystem for them) —
+        // this arm only exists so the match stays exhaustive.
+        ServerType::Bedrock => "datapack",
     }
 }
 
@@ -233,6 +242,7 @@ pub fn search(
                 installed: mine.contains(&h.project_id),
                 compatible,
                 server_side: h.server_side.unwrap_or_else(|| "unknown".into()),
+                client_side: h.client_side.unwrap_or_else(|| "unknown".into()),
                 project_id: h.project_id,
                 slug: h.slug,
                 title: h.title,

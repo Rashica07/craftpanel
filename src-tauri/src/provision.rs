@@ -26,6 +26,9 @@ pub enum Loader {
     Fabric,
     Neoforge,
     Forge,
+    /// Native Bedrock Dedicated Server — see `bedrock.rs`. Windows/Linux
+    /// only; no macOS build exists.
+    Bedrock,
 }
 
 impl Loader {
@@ -36,6 +39,7 @@ impl Loader {
             Loader::Fabric => ServerType::Fabric,
             // NeoForge is detected/stored as Forge for now (see ROADMAP).
             Loader::Neoforge | Loader::Forge => ServerType::Forge,
+            Loader::Bedrock => ServerType::Bedrock,
         }
     }
 }
@@ -101,6 +105,11 @@ pub fn list_versions(loader: Loader) -> Result<Vec<VersionInfo>, String> {
         Loader::Fabric => fabric_game_versions(),
         Loader::Neoforge => neoforge_versions(),
         Loader::Forge => forge_versions(),
+        // Mojang's download API always serves "whatever's current" — there's
+        // no historical version picker for Bedrock like there is for Java.
+        // One synthetic entry so the wizard's existing version-list UI works
+        // unchanged instead of needing a special case.
+        Loader::Bedrock => Ok(vec![VersionInfo { id: "current".into(), kind: "release".into() }]),
     }
 }
 
@@ -207,6 +216,7 @@ pub fn create(spec: &CreateSpec, progress: &ProgressFn) -> Result<Created, Strin
     }
     let java = spec.java_path.clone().unwrap_or_else(|| "java".to_string());
 
+    let mut mc_version = spec.mc_version.clone();
     let (server_type, launch_target) = match spec.loader {
         Loader::Vanilla => (ServerType::Vanilla, download_vanilla(spec, dir, progress)?),
         Loader::Paper => (ServerType::Paper, download_paper(spec, dir, progress)?),
@@ -214,15 +224,27 @@ pub fn create(spec: &CreateSpec, progress: &ProgressFn) -> Result<Created, Strin
         Loader::Neoforge | Loader::Forge => {
             (spec.loader.server_type(), run_installer(spec, dir, &java, progress)?)
         }
+        Loader::Bedrock => {
+            // Mojang's API has no version picker (see list_versions) — find
+            // out what we actually got from the download URL itself rather
+            // than reporting the wizard's placeholder "current".
+            let (target, real_version) = download_bedrock(dir, progress)?;
+            mc_version = real_version;
+            (ServerType::Bedrock, target)
+        }
     };
 
-    // EULA
-    progress(Progress { stage: "eula".into(), message: "Accepting the Minecraft EULA".into(), pct: None });
-    fs::write(
-        dir.join("eula.txt"),
-        "# Accepted via CraftPanel — https://aka.ms/MinecraftEULA\neula=true\n",
-    )
-    .map_err(|e| e.to_string())?;
+    // EULA — Bedrock Dedicated Server has no `eula.txt` mechanism at all
+    // (see bedrock.rs / process::eula_accepted); the wizard's checkbox is
+    // still the consent step, there's just no file to write here.
+    if server_type != ServerType::Bedrock {
+        progress(Progress { stage: "eula".into(), message: "Accepting the Minecraft EULA".into(), pct: None });
+        fs::write(
+            dir.join("eula.txt"),
+            "# Accepted via CraftPanel — https://aka.ms/MinecraftEULA\neula=true\n",
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     // First boot to generate server.properties / world / configs.
     first_boot(spec, dir, &java, &launch_target, server_type, progress)?;
@@ -230,9 +252,14 @@ pub fn create(spec: &CreateSpec, progress: &ProgressFn) -> Result<Created, Strin
     Ok(Created {
         server_type,
         launch_target,
-        mc_version: spec.mc_version.clone(),
+        mc_version,
         dir: spec.dir.clone(),
     })
+}
+
+fn download_bedrock(dir: &Path, progress: &ProgressFn) -> Result<(String, String), String> {
+    let version = crate::bedrock::download(dir, progress)?;
+    Ok((crate::bedrock::bin_name().to_string(), version))
 }
 
 fn download_to(
@@ -523,7 +550,12 @@ fn first_boot(
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(line) => {
                 let l = line.to_ascii_lowercase();
-                if l.contains("done (") && l.contains("for help") {
+                let saw_ready = if server_type.is_bedrock() {
+                    l.contains("server started.")
+                } else {
+                    l.contains("done (") && l.contains("for help")
+                };
+                if saw_ready {
                     ready = true;
                     break;
                 }
@@ -587,6 +619,286 @@ fn first_boot(
     Ok(())
 }
 
+// --- modpacks ----------------------------------------------------------------
+//
+// Modrinth `.mrpack` packs only — not CurseForge (their API needs an
+// application-issued key, an ongoing liability for a key baked into a
+// shipped app; Modrinth's is free and keyless, same as everything else this
+// app already talks to). Format confirmed against a real downloaded pack
+// (Fabulously Optimized, 2026-08-30), not just the spec doc:
+// `modrinth.index.json` names the Minecraft version + loader + loader
+// version in `dependencies`, lists every file with a hash and an
+// `env.server` marker (required/optional/unsupported), and carries plain
+// files to copy in under `overrides/` (always) and `server-overrides/`
+// (server installs only, wins over `overrides/` on conflict).
+//
+// A modpack dictates its own loader + MC version — unlike a normal create,
+// there's no picking one by hand — so this reuses the *existing*
+// loader-specific provisioning (`download_fabric`, `run_installer`,
+// `download_vanilla`) by building a synthetic `CreateSpec` from what the
+// pack declares, rather than duplicating that logic.
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModpackSpec {
+    pub project_id: String,
+    pub dir: String,
+    pub name: String,
+    pub ram_mb: u32,
+    pub java_path: Option<String>,
+    pub accept_eula: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModpackInfo {
+    pub project_id: String,
+    pub slug: String,
+    pub title: String,
+    pub description: String,
+    pub icon_url: Option<String>,
+    pub downloads: u64,
+    /// e.g. "1.21.1" — the newest published version's target, for display
+    /// before committing to a create.
+    pub mc_version: Option<String>,
+    pub loader: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MrpackIndex {
+    files: Vec<MrpackFile>,
+    dependencies: std::collections::HashMap<String, String>,
+}
+#[derive(Deserialize)]
+struct MrpackFile {
+    path: String,
+    hashes: MrpackHashes,
+    #[serde(default)]
+    env: Option<MrpackEnv>,
+    downloads: Vec<String>,
+}
+#[derive(Deserialize)]
+struct MrpackHashes {
+    sha1: Option<String>,
+}
+#[derive(Deserialize)]
+struct MrpackEnv {
+    server: Option<String>,
+}
+
+/// A file with no `env` block at all is required on both sides per the
+/// mrpack spec's own default — only an explicit "unsupported" excludes it.
+fn server_wants(f: &MrpackFile) -> bool {
+    f.env.as_ref().and_then(|e| e.server.as_deref()) != Some("unsupported")
+}
+
+/// Rejects anything that isn't a plain, contained relative path — a
+/// malicious or corrupt pack's file list is untrusted input, and these
+/// paths are about to become real filesystem writes.
+fn safe_relative_path(p: &str) -> bool {
+    let path = Path::new(p);
+    !p.is_empty()
+        && path.is_relative()
+        && !p.contains('\0')
+        && !path.components().any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+fn read_mrpack_index(archive_path: &Path) -> Result<MrpackIndex, String> {
+    let f = fs::File::open(archive_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
+    let mut entry = zip
+        .by_name("modrinth.index.json")
+        .map_err(|_| "This file doesn't look like a Modrinth modpack (.mrpack) — no modrinth.index.json inside.".to_string())?;
+    let mut buf = String::new();
+    entry.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+    serde_json::from_str(&buf).map_err(|e| format!("Couldn't read this modpack's manifest: {e}"))
+}
+
+/// Extracts everything under `overrides/` or `server-overrides/` in the
+/// pack into `dest`, stripping that prefix. Silently does nothing if the
+/// pack has no such folder — both are optional per the spec.
+fn extract_mrpack_dir(archive_path: &Path, prefix: &str, dest: &Path) -> Result<(), String> {
+    let f = fs::File::open(archive_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
+    let want = format!("{prefix}/");
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+        if name.ends_with('/') || !name.starts_with(&want) {
+            continue;
+        }
+        let rel = &name[want.len()..];
+        if !safe_relative_path(rel) {
+            continue;
+        }
+        let out = dest.join(rel);
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out_file = fs::File::create(&out).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The newest published version of a modpack — enough to show the picker in
+/// the wizard what it's about to install without committing to it.
+pub fn modpack_info(project_id: &str) -> Result<ModpackInfo, String> {
+    let project = get_json(&format!("https://api.modrinth.com/v2/project/{project_id}"))?;
+    let versions_val = get_json(&format!("https://api.modrinth.com/v2/project/{project_id}/version"))?;
+    let versions = versions_val.as_array().cloned().unwrap_or_default();
+    let latest = versions.first();
+    let deps = latest.and_then(|v| v["dependencies"].as_object());
+    let loader = deps.and_then(|d| {
+        ["fabric-loader", "forge", "neoforge", "quilt-loader"]
+            .iter()
+            .find(|k| d.contains_key(**k))
+            .map(|k| k.to_string())
+    });
+    Ok(ModpackInfo {
+        project_id: project_id.to_string(),
+        slug: project["slug"].as_str().unwrap_or(project_id).to_string(),
+        title: project["title"].as_str().unwrap_or("").to_string(),
+        description: project["description"].as_str().unwrap_or("").to_string(),
+        icon_url: project["icon_url"].as_str().map(str::to_string),
+        downloads: project["downloads"].as_u64().unwrap_or(0),
+        mc_version: deps.and_then(|d| d.get("minecraft")).and_then(|v| v.as_str()).map(str::to_string),
+        loader,
+    })
+}
+
+pub fn create_from_modpack(spec: &ModpackSpec, progress: &ProgressFn) -> Result<Created, String> {
+    let dir = Path::new(&spec.dir);
+    fs::create_dir_all(dir).map_err(|e| format!("can't create folder: {e}"))?;
+    if dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
+        return Err("That folder isn't empty — pick a fresh folder for a new server.".into());
+    }
+    if !spec.accept_eula {
+        return Err("You must accept the Minecraft EULA to create a server.".into());
+    }
+    let java = spec.java_path.clone().unwrap_or_else(|| "java".to_string());
+
+    progress(Progress { stage: "fetch".into(), message: "Looking up the modpack…".into(), pct: None });
+    let versions_val = get_json(&format!("https://api.modrinth.com/v2/project/{}/version", spec.project_id))?;
+    let versions = versions_val.as_array().ok_or("Modrinth returned something unexpected for this modpack.")?;
+    let version = versions.first().ok_or("This modpack has no published versions.")?;
+    let files = version["files"].as_array().filter(|a| !a.is_empty()).ok_or("Modrinth didn't list any files for this modpack.")?;
+    let primary = files
+        .iter()
+        .find(|f| f["primary"].as_bool().unwrap_or(false))
+        .unwrap_or(&files[0]);
+    let url = primary["url"].as_str().ok_or("Modpack file has no download URL.")?;
+    let want_sha1 = primary["hashes"]["sha1"].as_str().unwrap_or_default().to_string();
+    let filename = primary["filename"].as_str().unwrap_or("modpack.mrpack").to_string();
+
+    let tmp_dir = std::env::temp_dir().join("craftpanel-modpack-install");
+    fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let archive_path = tmp_dir.join(&filename);
+
+    progress(Progress { stage: "download".into(), message: format!("Downloading {filename}…"), pct: Some(0) });
+    download_to(url, &archive_path, "the modpack", progress)?;
+
+    if !want_sha1.is_empty() {
+        progress(Progress { stage: "verify".into(), message: "Verifying checksum".into(), pct: None });
+        let got = sha1_hex(&archive_path)?;
+        if got != want_sha1 {
+            let _ = fs::remove_file(&archive_path);
+            return Err(format!("checksum mismatch (sha1 {got} != {want_sha1}) — deleted rather than trust it"));
+        }
+    }
+
+    progress(Progress { stage: "index".into(), message: "Reading the modpack manifest…".into(), pct: None });
+    let index = read_mrpack_index(&archive_path)?;
+    let mc_version = index
+        .dependencies
+        .get("minecraft")
+        .cloned()
+        .ok_or("This modpack doesn't specify a Minecraft version.")?;
+
+    let (loader, loader_version) = if let Some(v) = index.dependencies.get("fabric-loader") {
+        (Loader::Fabric, Some(v.clone()))
+    } else if let Some(v) = index.dependencies.get("neoforge") {
+        (Loader::Neoforge, Some(v.clone()))
+    } else if let Some(v) = index.dependencies.get("forge") {
+        (Loader::Forge, Some(v.clone()))
+    } else if index.dependencies.contains_key("quilt-loader") {
+        return Err(
+            "This modpack needs Quilt, which CraftPanel doesn't provision yet — Fabric-only for now.".into(),
+        );
+    } else {
+        (Loader::Vanilla, None)
+    };
+
+    let sub_spec = CreateSpec {
+        loader,
+        mc_version: mc_version.clone(),
+        loader_version,
+        dir: spec.dir.clone(),
+        name: spec.name.clone(),
+        ram_mb: spec.ram_mb,
+        java_path: spec.java_path.clone(),
+        accept_eula: spec.accept_eula,
+        seed: None,
+        gamemode: None,
+        difficulty: None,
+        motd: None,
+        max_players: None,
+    };
+
+    progress(Progress {
+        stage: "loader".into(),
+        message: format!("Setting up {} {mc_version}…", loader.server_type().label()),
+        pct: None,
+    });
+    let (server_type, launch_target) = match loader {
+        Loader::Vanilla => (ServerType::Vanilla, download_vanilla(&sub_spec, dir, progress)?),
+        Loader::Fabric => (ServerType::Fabric, download_fabric(&sub_spec, dir, progress)?),
+        Loader::Neoforge | Loader::Forge => {
+            (loader.server_type(), run_installer(&sub_spec, dir, &java, progress)?)
+        }
+        Loader::Paper | Loader::Bedrock => unreachable!("never derived from mrpack dependencies"),
+    };
+
+    progress(Progress { stage: "eula".into(), message: "Accepting the Minecraft EULA".into(), pct: None });
+    fs::write(
+        dir.join("eula.txt"),
+        "# Accepted via CraftPanel — https://aka.ms/MinecraftEULA\neula=true\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let wanted: Vec<&MrpackFile> = index.files.iter().filter(|f| server_wants(f)).collect();
+    for (i, f) in wanted.iter().enumerate() {
+        if !safe_relative_path(&f.path) {
+            continue; // untrusted input — skip rather than risk a path-traversal write
+        }
+        let Some(file_url) = f.downloads.first() else { continue };
+        let out = dir.join(&f.path);
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        progress(Progress {
+            stage: "mods".into(),
+            message: format!("Installing mods… {}/{}", i + 1, wanted.len()),
+            pct: Some((((i + 1) * 100) / wanted.len().max(1)) as u8),
+        });
+        download_to(file_url, &out, &f.path, &|_| {})?; // per-file progress would be noisy at this granularity
+        if let Some(want) = &f.hashes.sha1 {
+            let got = sha1_hex(&out)?;
+            if &got != want {
+                return Err(format!("{}: checksum mismatch — the download may be corrupted, try again", f.path));
+            }
+        }
+    }
+
+    progress(Progress { stage: "overrides".into(), message: "Applying the pack's configs…".into(), pct: None });
+    extract_mrpack_dir(&archive_path, "overrides", dir)?;
+    extract_mrpack_dir(&archive_path, "server-overrides", dir)?; // wins on conflict — extracted second
+    let _ = fs::remove_file(&archive_path);
+
+    first_boot(&sub_spec, dir, &java, &launch_target, server_type, progress)?;
+
+    Ok(Created { server_type, launch_target, mc_version, dir: spec.dir.clone() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +907,85 @@ mod tests {
     fn loader_maps_to_server_type() {
         assert_eq!(Loader::Paper.server_type(), ServerType::Paper);
         assert_eq!(Loader::Neoforge.server_type(), ServerType::Forge);
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_traversal_and_absolute_paths() {
+        // these all came out of a real .mrpack's file list at some point in
+        // testing — untrusted input from a third-party-authored zip, worth
+        // exercising deliberately rather than trusting the happy path
+        assert!(safe_relative_path("mods/sodium.jar"));
+        assert!(safe_relative_path("config/nested/dir/file.toml"));
+        assert!(!safe_relative_path("../../../etc/passwd"));
+        assert!(!safe_relative_path("mods/../../../evil.jar"));
+        assert!(!safe_relative_path("/etc/passwd"));
+        assert!(!safe_relative_path(""));
+    }
+
+    #[test]
+    fn server_wants_defaults_to_true_without_an_env_block() {
+        let required = MrpackFile {
+            path: "mods/a.jar".into(),
+            hashes: MrpackHashes { sha1: None },
+            env: Some(MrpackEnv { server: Some("required".into()) }),
+            downloads: vec![],
+        };
+        let unsupported = MrpackFile {
+            path: "mods/client-only.jar".into(),
+            hashes: MrpackHashes { sha1: None },
+            env: Some(MrpackEnv { server: Some("unsupported".into()) }),
+            downloads: vec![],
+        };
+        let no_env = MrpackFile {
+            path: "mods/b.jar".into(),
+            hashes: MrpackHashes { sha1: None },
+            env: None,
+            downloads: vec![],
+        };
+        assert!(server_wants(&required));
+        assert!(!server_wants(&unsupported));
+        assert!(server_wants(&no_env)); // spec default: required if unstated
+    }
+
+    /// Real thing, end to end: hits the live Modrinth API, downloads an
+    /// actual published modpack (Fabulously Optimized — Fabric, has both
+    /// mods/ files and an overrides/ folder with real content), verifies
+    /// its checksum, provisions the right loader for it, downloads every
+    /// server-required file, applies overrides, and first-boots it. Same
+    /// discipline as `javainstall`'s and `bedrock`'s live tests — this is
+    /// the highest-surface-area new code in this batch, worth actually
+    /// running against the network.
+    #[test]
+    #[ignore]
+    fn live_create_from_real_modpack_end_to_end() {
+        let d = std::env::temp_dir().join("cp-modpack-install-test");
+        let _ = fs::remove_dir_all(&d);
+
+        let spec = ModpackSpec {
+            project_id: "fabulously-optimized".into(),
+            dir: d.to_string_lossy().to_string(),
+            name: "Modpack Test".into(),
+            ram_mb: 3072,
+            java_path: None,
+            accept_eula: true,
+        };
+
+        let created = create_from_modpack(&spec, &|p| {
+            println!("[{}] {} {:?}", p.stage, p.message, p.pct)
+        })
+        .expect("modpack create should succeed");
+
+        assert_eq!(created.server_type, ServerType::Fabric);
+        assert!(d.join("fabric-server-launch.jar").is_file());
+        assert!(d.join("server.properties").exists(), "first boot should have run");
+        assert!(d.join("eula.txt").exists());
+        let mods: Vec<_> = fs::read_dir(d.join("mods")).unwrap().flatten().collect();
+        assert!(mods.len() > 10, "expected a real mod list, got {}", mods.len());
+        // this pack ships overrides/config/... — confirms extraction landed,
+        // not just the mods/ downloads
+        assert!(d.join("config").is_dir(), "overrides/ should have been applied");
+
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -657,7 +1048,7 @@ mod tests {
         let created = create(&spec, &|p| eprintln!("[{}] {}", p.stage, p.message)).unwrap();
         assert_eq!(created.server_type, ServerType::Paper);
         assert!(dir.join("server.properties").exists());
-        assert!(crate::process::eula_accepted(&dir));
+        assert!(crate::process::eula_accepted(&dir, ServerType::Paper));
 
         // enable RCON
         let mut props = Properties::load(&dir);

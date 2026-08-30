@@ -59,7 +59,10 @@ fn catalogue(t: ServerType) -> Vec<(&'static str, &'static [&'static str], &'sta
             ("PandaAntiCheat", &["panda", "pandaanticheat"], "", "Lightweight Fabric anti-cheat."),
             ("NoCheatPlus (Fabric)", &["nocheat"], "", "Fabric port."),
         ],
-        ServerType::Vanilla => vec![],
+        // Vanilla has no plugin/mod loader to install an anti-cheat into;
+        // Bedrock has no Modrinth mod ecosystem in this sense at all (see
+        // bedrock.rs) — neither gets a catalogue.
+        ServerType::Vanilla | ServerType::Bedrock => vec![],
     }
 }
 

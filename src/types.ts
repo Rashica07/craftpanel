@@ -1,4 +1,4 @@
-export type ServerType = "fabric" | "forge" | "paper" | "spigot" | "vanilla";
+export type ServerType = "fabric" | "forge" | "paper" | "spigot" | "vanilla" | "bedrock";
 
 export interface JavaInfo {
   path: string;
@@ -123,7 +123,7 @@ export interface PlayerList {
   players: string[];
 }
 
-export type Loader = "vanilla" | "paper" | "fabric" | "neoforge" | "forge";
+export type Loader = "vanilla" | "paper" | "fabric" | "neoforge" | "forge" | "bedrock";
 
 export interface VersionInfo {
   id: string;
@@ -144,6 +144,39 @@ export interface CreateSpec {
   difficulty?: string | null;
   motd?: string | null;
   max_players?: number | null;
+}
+
+/** A search hit from Modrinth's modpack search — passed through mostly
+ * as-is from their API (see commands.rs::modpack_search), not remapped to
+ * camelCase like the rest of this app's types. */
+export interface ModpackHit {
+  project_id: string;
+  slug: string;
+  title: string;
+  description: string;
+  icon_url: string | null;
+  downloads: number;
+  display_categories?: string[];
+}
+
+export interface ModpackInfo {
+  projectId: string;
+  slug: string;
+  title: string;
+  description: string;
+  iconUrl: string | null;
+  downloads: number;
+  mcVersion: string | null;
+  loader: string | null;
+}
+
+export interface ModpackSpec {
+  project_id: string;
+  dir: string;
+  name: string;
+  ram_mb: number;
+  java_path: string | null;
+  accept_eula: boolean;
 }
 
 export interface World {
@@ -182,6 +215,8 @@ export interface Schedule {
   restartWarningSecs: number;
   timedCommands: TimedCommand[];
   backupOnStop: boolean;
+  intervalBackupHours: number | null;
+  cloudBackup: boolean;
 }
 
 export interface ModrinthHit {
@@ -196,6 +231,7 @@ export interface ModrinthHit {
   installed: boolean;
   compatible: boolean;
   serverSide: string;
+  clientSide: string;
 }
 
 export interface ModrinthSearch {
@@ -260,6 +296,18 @@ export interface UpdateCheck {
   url: string | null;
   notes: string | null;
   unavailable: string | null;
+}
+
+export interface DoctorCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface DoctorReport {
+  checks: DoctorCheck[];
+  allOk: boolean;
 }
 
 export interface MgmtStatus {
@@ -337,6 +385,7 @@ export const LOADER_META: Record<
   fabric: { label: "Fabric", blurb: "Lightweight mod loader" },
   neoforge: { label: "NeoForge", blurb: "Modern Forge fork" },
   forge: { label: "Forge", blurb: "The original mod loader" },
+  bedrock: { label: "Bedrock", blurb: "For phone, console & Windows-edition players" },
 };
 
 export interface SettingField {
@@ -469,4 +518,13 @@ export const SERVER_TYPE_META: Record<
   paper: { label: "Paper", blurb: "High-performance plugin server" },
   spigot: { label: "Spigot", blurb: "Bukkit plugin server" },
   vanilla: { label: "Vanilla", blurb: "Unmodified Mojang server" },
+  bedrock: { label: "Bedrock", blurb: "Native Bedrock Dedicated Server" },
 };
+
+/** Servers with no RCON, no mod/plugin loader, and a different world format
+ * — the tabs that assume those (Players, Add-ons, Mods, Worlds) don't apply
+ * and are hidden rather than shown broken. Console and Settings still work
+ * (stdin passthrough and server.properties both carry over). */
+export function hasNoRcon(t: ServerType): boolean {
+  return t === "bedrock";
+}

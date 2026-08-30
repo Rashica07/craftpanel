@@ -349,7 +349,13 @@ impl ProcessManager {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to launch java ({}): {e}", rec.java_path))?;
+            .map_err(|e| {
+                if rec.server_type.is_bedrock() {
+                    format!("Failed to launch the Bedrock server: {e}")
+                } else {
+                    format!("Failed to launch java ({}): {e}", rec.java_path)
+                }
+            })?;
 
         let pid = child.id();
         let now = now_secs();
@@ -376,8 +382,8 @@ impl ProcessManager {
             rt.stdin = Some(stdin.clone());
         }
 
-        spawn_reader(self.sink.clone(), shared.clone(), stdout, "stdout");
-        spawn_reader(self.sink.clone(), shared.clone(), stderr, "stderr");
+        spawn_reader(self.sink.clone(), shared.clone(), stdout, "stdout", rec.server_type);
+        spawn_reader(self.sink.clone(), shared.clone(), stderr, "stderr", rec.server_type);
         spawn_monitor(
             self.sink.clone(),
             shared.clone(),
@@ -601,8 +607,13 @@ impl ProcessManager {
     }
 }
 
-/// Has the Minecraft EULA been accepted in this folder? (`eula=true` in eula.txt)
-pub fn eula_accepted(dir: &Path) -> bool {
+/// Has the Minecraft EULA been accepted in this folder? (`eula=true` in
+/// eula.txt) — Bedrock Dedicated Server has no such file or flag at all, so
+/// there's nothing to gate: it's always "accepted" as far as launching goes.
+pub fn eula_accepted(dir: &Path, server_type: crate::adapter::ServerType) -> bool {
+    if server_type.is_bedrock() {
+        return true;
+    }
     match fs::read_to_string(dir.join("eula.txt")) {
         Ok(text) => text.lines().any(|l| {
             let l = l.trim();
@@ -624,6 +635,7 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     shared: Shared,
     pipe: R,
     stream: &'static str,
+    server_type: crate::adapter::ServerType,
 ) {
     thread::spawn(move || {
         let adapter = MinecraftAdapter;
@@ -636,7 +648,12 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
             }
             // promote Starting -> Running once the server reports ready
             if *shared.status.lock().unwrap() == ServerStatus::Starting {
-                if adapter.parse_status(&text) == ServerStatus::Running {
+                let running = if server_type.is_bedrock() {
+                    crate::bedrock::parse_status(&text) == ServerStatus::Running
+                } else {
+                    adapter.parse_status(&text) == ServerStatus::Running
+                };
+                if running {
                     shared.set_status(&sink, ServerStatus::Running);
                 }
             }
@@ -890,6 +907,24 @@ pub(crate) fn forge_args_file(dir: &Path) -> Option<String> {
 pub(crate) fn build_command(rec: &ServerRecord) -> Result<Command, String> {
     use crate::adapter::ServerType;
     let dir = Path::new(&rec.path);
+
+    if rec.server_type.is_bedrock() {
+        // A plain OS process, not a JVM at all — no heap flags, no `-jar`,
+        // just run the binary from its own folder (it loads
+        // behavior_packs/, resource_packs/, server.properties, etc.
+        // relative to the working directory).
+        let bin = dir.join(crate::bedrock::bin_name());
+        if !bin.is_file() {
+            return Err(format!(
+                "Can't find the Bedrock server binary at {}. Was this folder set up by CraftPanel?",
+                bin.display()
+            ));
+        }
+        let mut cmd = Command::new(&bin);
+        cmd.current_dir(dir);
+        return Ok(cmd);
+    }
+
     let mut cmd = Command::new(&rec.java_path);
     cmd.current_dir(dir);
 
@@ -975,11 +1010,15 @@ mod tests {
         let d = std::env::temp_dir().join("cp-eula");
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
-        assert!(!eula_accepted(&d));
+        use crate::adapter::ServerType;
+        assert!(!eula_accepted(&d, ServerType::Vanilla));
         fs::write(d.join("eula.txt"), "#comment\neula=false\n").unwrap();
-        assert!(!eula_accepted(&d));
+        assert!(!eula_accepted(&d, ServerType::Vanilla));
         fs::write(d.join("eula.txt"), "# a comment\neula = TRUE\n").unwrap();
-        assert!(eula_accepted(&d));
+        assert!(eula_accepted(&d, ServerType::Vanilla));
+        // Bedrock has no eula.txt mechanism — always "accepted".
+        let _ = fs::remove_file(d.join("eula.txt"));
+        assert!(eula_accepted(&d, ServerType::Bedrock));
         let _ = fs::remove_dir_all(&d);
     }
 

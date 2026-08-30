@@ -2,16 +2,20 @@ mod adapter;
 mod admin;
 mod analytics;
 mod anticheat;
+mod attribution;
 mod backups;
+mod bedrock;
 mod branding;
 mod cloud;
 mod commands;
 mod crashreports;
 mod crossplay;
 mod db;
+mod doctor;
 mod external;
 mod files;
 mod java;
+mod javainstall;
 mod mgmt;
 mod minecraft;
 mod modrinth;
@@ -91,6 +95,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -187,6 +193,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::detect_server,
             commands::detect_java,
+            commands::java_offerable_for,
+            commands::java_install_status,
+            commands::install_java,
+            commands::set_server_java_path,
             commands::add_server,
             commands::list_servers,
             commands::remove_server,
@@ -211,6 +221,9 @@ pub fn run() {
             commands::rcon_player_action,
             commands::loader_versions,
             commands::create_server,
+            commands::modpack_search,
+            commands::modpack_info,
+            commands::create_server_from_modpack,
             commands::get_settings,
             commands::apply_settings,
             commands::list_mods,
@@ -219,6 +232,7 @@ pub fn run() {
             commands::import_mods,
             commands::backup_now,
             commands::list_backups,
+            commands::cloud_backups,
             commands::delete_backup,
             commands::restore_backup,
             commands::get_backups_config,
@@ -266,6 +280,9 @@ pub fn run() {
             commands::app_settings_get,
             commands::app_settings_set,
             commands::check_update,
+            commands::install_update,
+            commands::app_install_id,
+            commands::doctor_check,
             commands::crossplay_status,
             commands::crossplay_enable,
             commands::crossplay_disable,

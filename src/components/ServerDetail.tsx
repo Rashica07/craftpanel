@@ -20,10 +20,13 @@ import {
   Tabs,
   Tooltip,
   cx,
+  toast,
   type TabDef,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { ConsoleView } from "./ConsoleView";
 import { RconPanel } from "./RconPanel";
+import { BroadcastSection } from "./BroadcastSection";
 import { SettingsPanel } from "./SettingsPanel";
 import { ModsPanel } from "./ModsPanel";
 import { BackupsPanel } from "./BackupsPanel";
@@ -179,6 +182,8 @@ export function ServerDetail({
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [crash, setCrash] = useState<CrashReport | null>(null);
   const [crashDismissed, setCrashDismissed] = useState(false);
+  const [suspectDisabled, setSuspectDisabled] = useState(false);
+  const [disablingSuspect, setDisablingSuspect] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const status = runtime?.status ?? "stopped";
@@ -189,6 +194,10 @@ export function ServerDetail({
   const reachable = status === "running" || externalRunning;
   const hasMods =
     server.server_type === "fabric" || server.server_type === "forge";
+  // No RCON, no Modrinth mod/plugin ecosystem, and a different world format
+  // — Players, Add-ons and Worlds don't apply to a native Bedrock server.
+  // Console and Settings both still work (stdin passthrough, server.properties).
+  const isBedrock = server.server_type === "bedrock";
   const isCloud = !!server.sync_code;
   const leasedElsewhere =
     !active &&
@@ -200,7 +209,14 @@ export function ServerDetail({
     setConsoleMode("live");
     setPendingRestart(false);
     setCrashDismissed(false);
+    setSuspectDisabled(false);
   }, [server.id]);
+
+  // a fresh crash report means a fresh suspect — don't keep showing
+  // "Disabled" for last time's culprit
+  useEffect(() => {
+    setSuspectDisabled(false);
+  }, [crash?.file]);
 
   // reattached / external servers have no live stream — show the log file
   useEffect(() => {
@@ -353,11 +369,11 @@ export function ServerDetail({
   const tabs: TabDef[] = [
     { id: "console", label: "Console", icon: "terminal" },
     { id: "network", label: "Network", icon: "signal" },
-    { id: "players", label: "Players", icon: "users" },
+    ...(isBedrock ? [] : [{ id: "players" as const, label: "Players", icon: "users" }]),
     { id: "settings", label: "Settings", icon: "sliders" },
-    { id: "browse", label: "Add-ons", icon: "sparkle" },
-    ...(hasMods ? [{ id: "mods", label: "Mods", icon: "package" }] : []),
-    { id: "worlds", label: "Worlds", icon: "globe" },
+    ...(isBedrock ? [] : [{ id: "browse" as const, label: "Add-ons", icon: "sparkle" }]),
+    ...(hasMods ? [{ id: "mods" as const, label: "Mods", icon: "package" }] : []),
+    ...(isBedrock ? [] : [{ id: "worlds" as const, label: "Worlds", icon: "globe" }]),
     { id: "backups", label: "Backups", icon: "archive" },
     { id: "files", label: "Files", icon: "folder" },
   ];
@@ -597,15 +613,43 @@ export function ServerDetail({
               }`}
               onDismiss={() => setCrashDismissed(true)}
               actions={
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon="play"
-                  onClick={onStartClick}
-                  disabled={busy}
-                >
-                  Start again
-                </Button>
+                <>
+                  {hasMods && crash?.suspect?.endsWith(".jar") && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={suspectDisabled ? "check" : "power"}
+                      disabled={busy || disablingSuspect || suspectDisabled}
+                      loading={disablingSuspect}
+                      onClick={async () => {
+                        setDisablingSuspect(true);
+                        try {
+                          await api.setModEnabled(server.id, crash!.suspect!, false);
+                          setSuspectDisabled(true);
+                          toast.ok(
+                            `Disabled ${crash!.suspect}`,
+                            "Moved to mods-disabled/ — start the server again to see if that was it.",
+                          );
+                        } catch (e) {
+                          toast.bad("Couldn't disable it", String(e));
+                        } finally {
+                          setDisablingSuspect(false);
+                        }
+                      }}
+                    >
+                      {suspectDisabled ? "Disabled" : "Disable it"}
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="play"
+                    onClick={onStartClick}
+                    disabled={busy}
+                  >
+                    Start again
+                  </Button>
+                </>
               }
             >
               {crash ? (
@@ -621,6 +665,13 @@ export function ServerDetail({
                       <span className="font-mono text-warn-soft">
                         {crash.suspect}
                       </span>
+                      {hasMods && crash.suspect.endsWith(".jar") && !suspectDisabled && (
+                        <span className="text-ink-faint">
+                          {" "}
+                          — disable it and CraftPanel will leave everything
+                          else exactly as it is.
+                        </span>
+                      )}
                     </div>
                   )}
                   <div className="text-ink-faint">
@@ -664,11 +715,12 @@ export function ServerDetail({
             </Banner>
           )}
 
-          {error && (
-            <Banner tone="bad" onDismiss={() => setError(null)}>
-              <span className="break-words">{error}</span>
-            </Banner>
-          )}
+          <ErrorBanner
+            message={error}
+            onDismiss={() => setError(null)}
+            serverId={server.id}
+            mcVersion={server.mc_version}
+          />
         </div>
       )}
 
@@ -719,6 +771,7 @@ export function ServerDetail({
               reachable={reachable}
               onNeedsRestart={() => setPendingRestart(true)}
             />
+            <BroadcastSection serverId={server.id} reachable={reachable} />
             <AdminPanel
               serverId={server.id}
               reachable={reachable}

@@ -3,7 +3,7 @@ import { api } from "./api";
 import { AddServerModal } from "./components/AddServerModal";
 import { CreateServerModal } from "./components/CreateServerModal";
 import { JoinSharedModal } from "./components/JoinSharedModal";
-import { AppSettingsModal } from "./components/AppSettingsModal";
+import { SettingsPage } from "./components/SettingsPage";
 import { ServerDetail } from "./components/ServerDetail";
 import {
   SERVER_TYPE_META,
@@ -126,6 +126,7 @@ function NewServerButton({
   onJoin: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const items = [
     {
       icon: "folder-open",
@@ -141,8 +142,31 @@ function NewServerButton({
     },
   ];
 
+  // mousedown + outside-of-ref, not a full-screen onClick scrim: a scrim div
+  // only exists in the DOM *after* the open-triggering click has already
+  // finished dispatching, so it shouldn't double-fire in theory — but on some
+  // webviews (WebView2 in particular) a fast click can still race the paint.
+  // This is the standard bulletproof pattern: no new DOM node in the hit-test
+  // path, so there's nothing for a stray click to land on and immediately
+  // close.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <div className="flex gap-px">
         <Button
           variant="primary"
@@ -168,10 +192,17 @@ function NewServerButton({
 
       {open && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          {/*
+            No entrance animation on this one, unlike the rest of the app's
+            popovers: it's the specific dropdown reported as "opens but
+            doesn't paint", and an opacity/transform CSS animation starting
+            on the very first frame an element exists is a known compositing
+            trap on some WebView2 builds. Cheap to remove, directly rules it
+            out as a cause.
+          */}
           <div
             role="menu"
-            className="cp-pop absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-lg border border-line bg-surface-2 p-1 shadow-e3"
+            className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-lg border border-line bg-surface-2 p-1 shadow-e3"
           >
             {items.map((it) => (
               <button
@@ -448,9 +479,12 @@ export default function App() {
                 key={s.id}
                 server={s}
                 status={statusOf(runtimes, s.id)}
-                selected={s.id === selectedId}
+                selected={!showSettings && s.id === selectedId}
                 players={players[s.id] ?? null}
-                onSelect={() => setSelectedId(s.id)}
+                onSelect={() => {
+                  setShowSettings(false);
+                  setSelectedId(s.id);
+                }}
               />
             ))
           )}
@@ -459,9 +493,18 @@ export default function App() {
         <footer className="border-t border-line-soft p-2">
           <button
             onClick={() => setShowSettings(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[120ms] hover:bg-surface-2"
+            aria-current={showSettings ? "true" : undefined}
+            className={cx(
+              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[120ms]",
+              showSettings ? "bg-surface-3 text-ink" : "hover:bg-surface-2",
+            )}
           >
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-faint">
+            <span
+              className={cx(
+                "grid h-7 w-7 shrink-0 place-items-center rounded-md",
+                showSettings ? "bg-accent-muted text-accent-soft" : "bg-surface-2 text-ink-faint",
+              )}
+            >
               <Icon name="gear" size={14} />
             </span>
             <span className="min-w-0 flex-1">
@@ -469,7 +512,7 @@ export default function App() {
                 CraftPanel settings
               </span>
               <span className="block text-2xs text-ink-faint">
-                Java, memory, updates
+                Java, updates, cloud &amp; more
               </span>
             </span>
             <Icon name="chevron-right" size={13} className="text-ink-ghost" />
@@ -483,6 +526,8 @@ export default function App() {
           <div className="flex h-full items-center justify-center">
             <LogoMark size={40} />
           </div>
+        ) : showSettings ? (
+          <SettingsPage onClose={() => setShowSettings(false)} />
         ) : selected ? (
           <ServerDetail
             key={selected.id}
@@ -529,10 +574,6 @@ export default function App() {
           }}
         />
       )}
-      {showSettings && (
-        <AppSettingsModal onClose={() => setShowSettings(false)} />
-      )}
-
       <Toaster />
     </div>
   );

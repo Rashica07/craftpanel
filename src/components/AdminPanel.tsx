@@ -12,6 +12,7 @@ import {
   TextInput,
   Toggle,
 } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 
 export function AdminPanel({
   serverId,
@@ -244,11 +245,7 @@ export function AdminPanel({
         onRemove={(n) => act("pardon", n.split(" — ")[0])}
       />
 
-      {error && (
-        <Banner tone="bad" onDismiss={() => setError(null)}>
-          {error}
-        </Banner>
-      )}
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
     </div>
   );
 }

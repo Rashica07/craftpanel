@@ -663,7 +663,6 @@ export function Toggle({
 }) {
   const w = size === "sm" ? "h-4 w-7" : "h-5 w-9";
   const knob = size === "sm" ? "h-3 w-3" : "h-4 w-4";
-  const travel = size === "sm" ? "translate-x-3.5" : "translate-x-4";
   return (
     <button
       id={id}
@@ -674,18 +673,22 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cx(
-        "relative shrink-0 rounded-full border transition-colors duration-[160ms] ease-cp disabled:cursor-not-allowed disabled:opacity-40",
+        // flex + justify-start/end instead of absolute + a hardcoded translate
+        // distance: the knob's inset comes from padding, so it's geometrically
+        // impossible for it to render outside the track, whatever the border
+        // width or box-sizing does. (The old translate-x-4 guess didn't clamp
+        // and could push the knob past the right edge on "on".)
+        "relative flex shrink-0 items-center rounded-full border p-0.5 transition-colors duration-[160ms] ease-cp disabled:cursor-not-allowed disabled:opacity-40",
         w,
         checked
-          ? "border-transparent bg-accent"
-          : "border-line bg-surface-3 hover:bg-surface-4",
+          ? "justify-end border-transparent bg-accent"
+          : "justify-start border-line bg-surface-3 hover:bg-surface-4",
       )}
     >
       <span
         className={cx(
-          "absolute top-1/2 -translate-y-1/2 rounded-full bg-white shadow-e1 transition-transform duration-[160ms] ease-cp",
+          "rounded-full bg-white shadow-e1 transition-transform duration-[160ms] ease-cp",
           knob,
-          checked ? travel : "translate-x-0.5",
         )}
       />
     </button>

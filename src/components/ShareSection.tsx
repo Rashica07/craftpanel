@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { CloudStatus, ServerRecord, ShareView } from "../types";
 import { Badge, Button, Card } from "./ui";
+import { ErrorBanner } from "./ErrorBanner";
 import { R2SetupModal } from "./R2SetupModal";
 
 export function leaseLabel(v: ShareView): { text: string; tone: "ok" | "warn" | "neutral" } {
@@ -168,11 +169,7 @@ export function ShareSection({
       )}
 
       {msg && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{msg}</div>}
-      {error && (
-        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
-          {error}
-        </div>
-      )}
+      <ErrorBanner message={error} className="mt-2" />
 
       {showR2 && (
         <R2SetupModal
