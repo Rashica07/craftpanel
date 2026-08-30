@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Schedule } from "../types";
-import { Button } from "./ui";
-import { Icon } from "./Icon";
+import { Button, Card } from "./ui";
 
 const EMPTY: Schedule = {
   restartOnCrash: false,
@@ -62,10 +61,11 @@ export function AutomationSection({ serverId }: { serverId: string }) {
   }
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-        <Icon name="clock" size={13} /> Automation
-      </div>
+    <Card
+      title="Keep it running by itself"
+      icon="clock"
+      description="Auto-restart after a crash, a nightly reboot, and scheduled commands."
+    >
 
       <label className="flex items-start gap-2 text-sm">
         <input
@@ -76,7 +76,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         />
         <span className="flex-1">
           Restart automatically if it crashes
-          <span className="ml-1 text-[11px] text-ink-faint">
+          <span className="ml-1 text-2xs text-ink-faint">
             (give up after{" "}
             <input
               type="number"
@@ -84,7 +84,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
               max={20}
               value={sch.maxCrashRestarts}
               onChange={(e) => set("maxCrashRestarts", Number(e.target.value) || 3)}
-              className="mx-0.5 w-12 rounded border border-edge bg-panel-2 px-1 py-0.5 text-center text-ink"
+              className="mx-0.5 w-12 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink"
             />
             crashes in 15 min)
           </span>
@@ -97,11 +97,11 @@ export function AutomationSection({ serverId }: { serverId: string }) {
           type="time"
           value={sch.dailyRestart ?? ""}
           onChange={(e) => set("dailyRestart", e.target.value || null)}
-          className="rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink"
+          className="rounded border border-line bg-surface-2 px-2 py-1 text-sm text-ink"
         />
       </label>
       {sch.dailyRestart && (
-        <p className="mt-0.5 text-[11px] text-ink-faint">
+        <p className="mt-0.5 text-2xs text-ink-faint">
           Players get a <code>/say</code> warning ~1 min before. Local time.
         </p>
       )}
@@ -115,14 +115,14 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         />
         <span>
           Back up every time the server stops
-          <span className="ml-1 text-[11px] text-ink-faint">
+          <span className="ml-1 text-2xs text-ink-faint">
             (counts toward the keep-limit)
           </span>
         </span>
       </label>
 
-      <div className="mt-3 border-t border-edge pt-2">
-        <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
+      <div className="mt-3 border-t border-line pt-2">
+        <div className="mb-1 text-2xs uppercase tracking-wide text-ink-faint">
           Timed commands
         </div>
         {sch.timedCommands.map((c, i) => (
@@ -136,7 +136,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
                   sch.timedCommands.map((x, j) => (j === i ? { ...x, at: e.target.value } : x)),
                 )
               }
-              className="rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink"
+              className="rounded border border-line bg-surface-2 px-2 py-1 text-sm text-ink"
             />
             <input
               value={c.command}
@@ -149,7 +149,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
                   ),
                 )
               }
-              className="flex-1 rounded border border-edge bg-panel-2 px-2 py-1 font-mono text-xs text-ink outline-none focus:border-accent"
+              className="flex-1 rounded border border-line bg-surface-2 px-2 py-1 font-mono text-xs text-ink outline-none focus:border-accent"
             />
             <button
               className="px-1 text-ink-faint hover:text-bad"
@@ -178,13 +178,13 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         <Button variant="primary" disabled={busy || !dirty} onClick={save}>
           {busy ? "Saving…" : dirty ? "Save automation" : "Saved"}
         </Button>
-        {note && <span className="text-[11px] text-ink-dim">{note}</span>}
+        {note && <span className="text-2xs text-ink-dim">{note}</span>}
       </div>
       {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
           {error}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

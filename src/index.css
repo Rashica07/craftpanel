@@ -1,34 +1,276 @@
 @import "tailwindcss";
 
-@theme {
-  /* --- orange accent --- */
-  --color-accent: #ff8c00;
-  --color-accent-hover: #ffa236;
-  --color-accent-press: #e67e00;
-  --color-accent-muted: #2a1c0c;
-  --color-accent-ring: #ff8c0055;
+/* ============================================================================
+   CraftPanel design tokens
+   ----------------------------------------------------------------------------
+   Raw values live on :root as --cp-* so a light theme is a single extra block
+   (see :root[data-theme="light"]). `@theme inline` below maps them onto
+   Tailwind utilities *by reference*, so flipping data-theme re-themes the whole
+   app at runtime with no rebuild.
 
-  /* --- warm dark surfaces (bottom → top) --- */
-  --color-bg: #0b0c0e;
-  --color-panel: #141519;
-  --color-panel-2: #1c1e23;
-  --color-panel-3: #24262d;
-  --color-edge: #33363f;
-  --color-edge-soft: #2a2d34;
+   Platform: main.tsx stamps <html data-os="mac|win|other">. Anything that
+   should feel native per-OS (radius, font stack, shadow weight, control
+   density) keys off that, so we get a macOS build and a Windows build out of
+   one codebase.
+   ========================================================================== */
 
-  --color-ink: #eceef1;
-  --color-ink-dim: #a3a9b4;
-  --color-ink-faint: #6c7280;
-
-  --color-ok: #46c25a;
-  --color-warn: #e0a53a;
-  --color-bad: #f0564d;
-
-  --radius-sm: 4px;
-  --radius: 7px;
-  --radius-lg: 11px;
+/* --- bundled display face (SIL OFL 1.1) ----------------------------------- */
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("/fonts/space-grotesk-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
 }
 
+:root {
+  /* ---- surfaces: warm charcoal, bottom → top -------------------------- */
+  --cp-bg: #0d0c0f; /* app canvas, behind everything          */
+  --cp-surface: #151418; /* sidebar, cards                         */
+  --cp-surface-2: #1c1b21; /* inputs, rows inside a card             */
+  --cp-surface-3: #23222a; /* hover, selected row                    */
+  --cp-surface-4: #2c2b34; /* pressed, active segment                */
+  --cp-console: #0a090c; /* terminal / log wells                   */
+
+  /* ---- lines ---------------------------------------------------------- */
+  --cp-line-soft: #232228; /* internal dividers, card headers        */
+  --cp-line: #2e2d36; /* default border                         */
+  --cp-line-strong: #3d3c47; /* emphasised border, scrollbar thumb     */
+
+  /* ---- ink ------------------------------------------------------------ */
+  --cp-ink: #f2f0ef; /* primary text          ~15.8:1 on bg    */
+  --cp-ink-dim: #b0adb6; /* secondary text        ~8.1:1  on bg    */
+  --cp-ink-faint: #908d98; /* tertiary / captions   ≥4.8:1 on every surface */
+  --cp-ink-ghost: #6f6c79; /* placeholders, disabled, dividers (≥3:1) */
+
+  /* ---- accent (Minecraft orange) -------------------------------------- */
+  --cp-accent: #ff8c00;
+  --cp-accent-hover: #ffa033;
+  --cp-accent-press: #e07a00;
+  --cp-accent-soft: #ffb066; /* accent text on dark: ~9.4:1            */
+  --cp-accent-muted: #2a1c0b; /* tinted fill behind accent content      */
+  --cp-accent-line: #ff8c0040;
+  --cp-accent-ring: #ff8c0066;
+  --cp-on-accent: #180d00; /* text on an accent fill                 */
+
+  /* ---- semantic status ------------------------------------------------ */
+  --cp-ok: #46c46e;
+  --cp-ok-soft: #7fdb9c;
+  --cp-ok-muted: #0e2416;
+  --cp-warn: #e8a33d;
+  --cp-warn-soft: #f2c47c;
+  --cp-warn-muted: #2a1f0a;
+  --cp-bad: #f4655c;
+  --cp-bad-soft: #fa9891;
+  --cp-bad-muted: #2b1210;
+  --cp-info: #5aa2f0;
+  --cp-info-soft: #93c2f7;
+  --cp-info-muted: #0d1b2c;
+
+  /* ---- radius (macOS default; Windows overrides below) ---------------- */
+  --cp-r-xs: 4px;
+  --cp-r-sm: 6px;
+  --cp-r-md: 9px;
+  --cp-r-lg: 12px;
+  --cp-r-xl: 16px;
+  --cp-r-2xl: 22px;
+
+  /* ---- shadow: soft depth, never a hard drop -------------------------- */
+  --cp-sh-inset: inset 0 1px 0 #ffffff0a;
+  --cp-sh-1: 0 1px 2px #00000059, inset 0 1px 0 #ffffff08;
+  --cp-sh-2: 0 4px 12px -2px #00000073, 0 1px 2px #0000004d,
+    inset 0 1px 0 #ffffff0a;
+  --cp-sh-3: 0 18px 44px -12px #000000a6, 0 4px 12px #00000059,
+    inset 0 1px 0 #ffffff0f;
+  --cp-sh-glow: 0 0 0 1px var(--cp-accent-line), 0 6px 20px -6px #ff8c0040;
+
+  /* ---- motion: fast + purposeful, nothing bouncy ---------------------- */
+  --cp-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --cp-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --cp-t-fast: 120ms;
+  --cp-t: 160ms;
+  --cp-t-slow: 220ms;
+
+  /* ---- typography ------------------------------------------------------ */
+  --cp-font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --cp-font-body: ui-sans-serif, system-ui, -apple-system, "SF Pro Text",
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --cp-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono",
+    Menlo, Consolas, monospace;
+
+  /* ---- per-OS control density ----------------------------------------- */
+  --cp-control-h: 32px;
+  --cp-control-px: 12px;
+}
+
+/* ---- Windows: Fluent-leaning. Tighter corners, crisper edges, denser
+       controls, Segoe first. Same tokens, native feel.  -------------------- */
+:root[data-os="win"] {
+  --cp-r-xs: 2px;
+  --cp-r-sm: 4px;
+  --cp-r-md: 6px;
+  --cp-r-lg: 8px;
+  --cp-r-xl: 10px;
+  --cp-r-2xl: 14px;
+
+  --cp-sh-1: 0 1px 2px #00000066;
+  --cp-sh-2: 0 2px 8px -1px #0000008c, 0 1px 2px #00000066;
+  --cp-sh-3: 0 12px 32px -8px #000000b3, 0 2px 8px #00000073;
+
+  --cp-line: #35343d; /* Fluent likes a visible 1px stroke */
+  --cp-line-strong: #46454f;
+
+  --cp-font-body: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif,
+    system-ui, sans-serif;
+  --cp-font-mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace,
+    monospace;
+
+  --cp-control-h: 30px;
+  --cp-control-px: 11px;
+}
+
+/* ---- light theme: defined now, wired to a switch later ------------------ */
+:root[data-theme="light"] {
+  --cp-bg: #f6f5f4;
+  --cp-surface: #ffffff;
+  --cp-surface-2: #f4f3f2;
+  --cp-surface-3: #ebe9e7;
+  --cp-surface-4: #e0ddda;
+  --cp-console: #1a1920;
+
+  --cp-line-soft: #eceae8;
+  --cp-line: #dedbd8;
+  --cp-line-strong: #c6c2be;
+
+  --cp-ink: #1a1820;
+  --cp-ink-dim: #55525c;
+  --cp-ink-faint: #6f6c77;
+  --cp-ink-ghost: #a8a5ad;
+
+  --cp-accent: #d97400;
+  --cp-accent-hover: #c26800;
+  --cp-accent-press: #a85a00;
+  --cp-accent-soft: #9c5400;
+  --cp-accent-muted: #fff2e0;
+  --cp-accent-line: #d9740040;
+  --cp-on-accent: #ffffff;
+
+  --cp-ok: #1a8c45;
+  --cp-ok-soft: #146b34;
+  --cp-ok-muted: #e7f6ec;
+  --cp-warn: #a86a08;
+  --cp-warn-soft: #855205;
+  --cp-warn-muted: #fdf3e0;
+  --cp-bad: #c9342b;
+  --cp-bad-soft: #9e2820;
+  --cp-bad-muted: #fdeceb;
+  --cp-info: #1f6fc4;
+  --cp-info-soft: #17558f;
+  --cp-info-muted: #e9f1fb;
+
+  --cp-sh-inset: inset 0 1px 0 #ffffff;
+  --cp-sh-1: 0 1px 2px #0000000f;
+  --cp-sh-2: 0 4px 12px -2px #00000014, 0 1px 2px #0000000f;
+  --cp-sh-3: 0 18px 44px -12px #00000026, 0 4px 12px #00000014;
+}
+
+/* ============================================================================
+   Tailwind mapping. `inline` keeps the var reference so themes swap live.
+   ========================================================================== */
+@theme inline {
+  /* canonical surface ramp */
+  --color-bg: var(--cp-bg);
+  --color-surface: var(--cp-surface);
+  --color-surface-2: var(--cp-surface-2);
+  --color-surface-3: var(--cp-surface-3);
+  --color-surface-4: var(--cp-surface-4);
+  --color-console: var(--cp-console);
+
+  /* legacy aliases — the ~20 existing feature panels still use these */
+  --color-panel: var(--cp-surface);
+  --color-panel-2: var(--cp-surface-2);
+  --color-panel-3: var(--cp-surface-3);
+  --color-edge: var(--cp-line);
+  --color-edge-soft: var(--cp-line-soft);
+
+  --color-line: var(--cp-line);
+  --color-line-soft: var(--cp-line-soft);
+  --color-line-strong: var(--cp-line-strong);
+
+  --color-ink: var(--cp-ink);
+  --color-ink-dim: var(--cp-ink-dim);
+  --color-ink-faint: var(--cp-ink-faint);
+  --color-ink-ghost: var(--cp-ink-ghost);
+
+  --color-accent: var(--cp-accent);
+  --color-accent-hover: var(--cp-accent-hover);
+  --color-accent-press: var(--cp-accent-press);
+  --color-accent-soft: var(--cp-accent-soft);
+  --color-accent-muted: var(--cp-accent-muted);
+  --color-accent-line: var(--cp-accent-line);
+  --color-accent-ring: var(--cp-accent-ring);
+  --color-on-accent: var(--cp-on-accent);
+
+  --color-ok: var(--cp-ok);
+  --color-ok-soft: var(--cp-ok-soft);
+  --color-ok-muted: var(--cp-ok-muted);
+  --color-warn: var(--cp-warn);
+  --color-warn-soft: var(--cp-warn-soft);
+  --color-warn-muted: var(--cp-warn-muted);
+  --color-bad: var(--cp-bad);
+  --color-bad-soft: var(--cp-bad-soft);
+  --color-bad-muted: var(--cp-bad-muted);
+  --color-info: var(--cp-info);
+  --color-info-soft: var(--cp-info-soft);
+  --color-info-muted: var(--cp-info-muted);
+
+  --radius-xs: var(--cp-r-xs);
+  --radius-sm: var(--cp-r-sm);
+  --radius-md: var(--cp-r-md);
+  --radius: var(--cp-r-md);
+  --radius-lg: var(--cp-r-lg);
+  --radius-xl: var(--cp-r-xl);
+  --radius-2xl: var(--cp-r-2xl);
+
+  --shadow-e1: var(--cp-sh-1);
+  --shadow-e2: var(--cp-sh-2);
+  --shadow-e3: var(--cp-sh-3);
+  --shadow-glow: var(--cp-sh-glow);
+  --inset-shadow-hairline: var(--cp-sh-inset);
+
+  --font-display: var(--cp-font-display);
+  --font-sans: var(--cp-font-body);
+  --font-mono: var(--cp-font-mono);
+
+  /* type scale — 6 steps, tuned for a 1200×800 desktop window */
+  --text-2xs: 0.6875rem; /* 11px  micro labels, meta            */
+  --text-2xs--line-height: 1.36;
+  --text-xs: 0.75rem; /* 12px  help text, badges             */
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.8125rem; /* 13px  body / controls (desktop UI)  */
+  --text-sm--line-height: 1.54;
+  --text-base: 0.875rem; /* 14px  prose                         */
+  --text-base--line-height: 1.6;
+  --text-lg: 1.0625rem; /* 17px  card titles                   */
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.375rem; /* 22px  screen titles                 */
+  --text-xl--line-height: 1.25;
+  --text-2xl: 1.75rem; /* 28px  hero                          */
+  --text-2xl--line-height: 1.18;
+  --text-3xl: 2.25rem; /* 36px  onboarding hero               */
+  --text-3xl--line-height: 1.1;
+
+  --ease-cp: var(--cp-ease);
+  --default-transition-duration: var(--cp-t-fast);
+  --default-transition-timing-function: var(--cp-ease);
+}
+
+/* ============================================================================
+   Base
+   ========================================================================== */
 html,
 body,
 #root {
@@ -37,74 +279,372 @@ body,
 
 body {
   margin: 0;
-  color: var(--color-ink);
-  background-color: var(--color-bg);
-  /* a very faint warm vignette so the flat dark has some depth */
+  color: var(--cp-ink);
+  background-color: var(--cp-bg);
+  /* one faint warm bloom top-left so the flat dark has somewhere to breathe */
   background-image:
-    radial-gradient(1200px 600px at 12% -10%, #ff8c000a, transparent 60%),
-    radial-gradient(900px 500px at 110% 10%, #ffffff05, transparent 55%);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    radial-gradient(1100px 620px at 6% -12%, #ff8c000e, transparent 62%),
+    radial-gradient(820px 460px at 108% 4%, #ffffff06, transparent 58%);
+  background-attachment: fixed;
+  font-family: var(--cp-font-body);
+  font-size: 0.8125rem;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* it's an app window, not a document */
+  overscroll-behavior: none;
+  cursor: default;
+}
+
+/* chrome text is UI, not content — don't let it be selected by accident */
+body,
+button,
+label,
+th {
+  user-select: none;
+}
+input,
+textarea,
+pre,
+code,
+[data-selectable] {
+  user-select: text;
 }
 
 h1,
 h2,
-h3 {
-  letter-spacing: -0.01em;
+h3,
+h4,
+.font-display {
+  font-family: var(--cp-font-display);
+  letter-spacing: -0.018em;
+  font-weight: 600;
 }
 
-/* headings get a subtle blocky feel via weight + tight tracking */
-.display {
-  font-weight: 800;
-  letter-spacing: -0.02em;
+/* the wordmark / hero lockup — heavier and tighter than headings */
+.cp-display {
+  font-family: var(--cp-font-display);
+  font-weight: 700;
+  letter-spacing: -0.035em;
 }
 
-/* MC-flavoured button bevel */
-.btn-bevel {
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  border-bottom: 2px solid rgba(0, 0, 0, 0.35);
-}
-.btn-bevel:active:not(:disabled) {
-  border-bottom-width: 1px;
-  transform: translateY(1px);
+code,
+kbd,
+pre,
+.font-mono {
+  font-family: var(--cp-font-mono);
+  font-feature-settings: "zero" 1;
 }
 
-/* thin dark scrollbars */
+/* ---- scrollbars: thin, only visible where content actually scrolls ------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-edge) transparent;
+  scrollbar-color: var(--cp-line-strong) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
 *::-webkit-scrollbar-thumb {
-  background: var(--color-edge);
-  border-radius: 6px;
+  background: var(--cp-line);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 99px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #414550;
+  background: var(--cp-line-strong);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-/* focus ring */
-*:focus-visible {
-  outline: 2px solid var(--color-accent-ring);
+/* ---- focus: always visible, never on a mouse click ---------------------- */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--cp-accent);
+  outline-offset: 2px;
+  border-radius: var(--cp-r-xs);
+}
+/* Fluent draws focus as a light ring on a dark stroke */
+:root[data-os="win"] :focus-visible {
+  outline: 2px solid var(--cp-ink);
   outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--cp-bg);
 }
 
+::selection {
+  background: var(--cp-accent-ring);
+  color: var(--cp-ink);
+}
+
+::placeholder {
+  color: var(--cp-ink-ghost);
+}
+
+a {
+  color: var(--cp-accent-soft);
+  text-underline-offset: 2px;
+}
+
+/* ============================================================================
+   Motion — 120–180ms, ease-out, no bounce.
+   ========================================================================== */
 @keyframes cp-fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
+@keyframes cp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes cp-scale-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cp-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes cp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes cp-halo {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+    opacity: 0;
+  }
+}
+@keyframes cp-shimmer {
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes cp-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 .cp-in {
-  animation: cp-fade-in 0.18s ease-out;
+  animation: cp-fade-in var(--cp-t) var(--cp-ease) both;
+}
+.cp-fade {
+  animation: cp-fade var(--cp-t-fast) var(--cp-ease) both;
+}
+.cp-pop {
+  animation: cp-scale-in var(--cp-t-slow) var(--cp-ease) both;
+}
+.cp-toast {
+  animation: cp-toast-in var(--cp-t) var(--cp-ease) both;
+}
+.cp-spin {
+  animation: cp-spin 0.7s linear infinite;
+}
+.cp-pulse {
+  animation: cp-pulse 1.6s var(--cp-ease) infinite;
+}
+/* the "live" ring around a running-server dot */
+.cp-halo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 99px;
+  animation: cp-halo 2.4s var(--cp-ease) infinite;
+}
+.cp-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--cp-surface-2) 0%,
+    var(--cp-surface-3) 40%,
+    var(--cp-surface-2) 80%
+  );
+  background-size: 200% 100%;
+  animation: cp-shimmer 1.4s linear infinite;
+}
+.cp-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: 99px;
+  background: var(--cp-accent);
+  animation: cp-indeterminate 1.1s var(--cp-ease) infinite;
+}
+
+/* stagger children on panel enter — cheap, reads as one motion */
+.cp-stagger > * {
+  animation: cp-fade-in var(--cp-t) var(--cp-ease) both;
+}
+.cp-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.cp-stagger > *:nth-child(2) { animation-delay: 24ms; }
+.cp-stagger > *:nth-child(3) { animation-delay: 48ms; }
+.cp-stagger > *:nth-child(4) { animation-delay: 72ms; }
+.cp-stagger > *:nth-child(n + 5) { animation-delay: 90ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================================
+   Small shared primitives used across panels
+   ========================================================================== */
+
+/* faint pixel/blocky motif — dividers, empty-state art, hero backdrop.
+   A 4px checker at 3% alpha: reads as texture, never as a texture pack. */
+.cp-pixels {
+  background-image:
+    linear-gradient(45deg, #ffffff08 25%, transparent 25%),
+    linear-gradient(-45deg, #ffffff08 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ffffff08 75%),
+    linear-gradient(-45deg, transparent 75%, #ffffff08 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+/* a hairline rule that fades out at both ends */
+.cp-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--cp-line) 15%,
+    var(--cp-line) 85%,
+    transparent
+  );
+}
+
+/* native range input, themed */
+.cp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+.cp-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(
+    to right,
+    var(--cp-accent) 0 var(--cp-fill, 0%),
+    var(--cp-surface-3) var(--cp-fill, 0%) 100%
+  );
+}
+.cp-range::-moz-range-track {
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(
+    to right,
+    var(--cp-accent) 0 var(--cp-fill, 0%),
+    var(--cp-surface-3) var(--cp-fill, 0%) 100%
+  );
+}
+.cp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 99px;
+  background: #fff;
+  border: 1px solid #00000033;
+  box-shadow: var(--cp-sh-1);
+  transition: transform var(--cp-t-fast) var(--cp-ease);
+}
+.cp-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  background: #fff;
+  border: 1px solid #00000033;
+  box-shadow: var(--cp-sh-1);
+}
+.cp-range:active::-webkit-slider-thumb {
+  transform: scale(1.14);
+}
+.cp-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* native checkbox, themed (used by panels we didn't hand-rewrite) */
+input[type="checkbox"] {
+  accent-color: var(--cp-accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* select: kill the OS chrome, we draw our own chevron */
+.cp-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+.cp-select option {
+  background: var(--cp-surface-2);
+  color: var(--cp-ink);
+}
+
+/* the console/log well */
+.cp-well {
+  background-color: var(--cp-console);
+  background-image: radial-gradient(
+    600px 300px at 50% 0%,
+    #ffffff05,
+    transparent 70%
+  );
 }

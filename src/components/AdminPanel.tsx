@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { AdminLists, PlayerAction } from "../types";
-import { Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  IconButton,
+  SettingRow,
+  StateBlock,
+  TextInput,
+  Toggle,
+} from "./ui";
 
 export function AdminPanel({
   serverId,
@@ -61,116 +71,183 @@ export function AdminPanel({
     }
   }
 
+  /** Operators / Whitelist / Banned all share this shape. */
   function Section({
     title,
+    icon,
+    tone,
+    blurb,
     items,
     onRemove,
+    removeLabel,
     addKey,
     addAction,
     placeholder,
+    emptyMsg,
   }: {
     title: string;
+    icon: string;
+    tone?: "accent" | "ok" | "bad";
+    blurb: string;
     items: string[];
     onRemove: (name: string) => void;
+    removeLabel: string;
     addKey: "op" | "white" | "ban";
     addAction: PlayerAction;
     placeholder: string;
+    emptyMsg: string;
   }) {
     return (
-      <div className="rounded-lg border border-edge bg-panel p-3">
-        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-          {title} <span className="text-ink-faint">({items.length})</span>
-        </div>
-        <ul className="mb-2 space-y-1">
-          {items.map((n) => (
-            <li
-              key={n}
-              className="flex items-center justify-between rounded bg-panel-2 px-2 py-1 text-sm"
-            >
-              <span>{n}</span>
-              <button
-                className="text-[11px] text-ink-faint hover:text-bad"
-                onClick={() => onRemove(n)}
-                disabled={busy}
+      <Card
+        title={title}
+        icon={icon}
+        tone={tone}
+        description={blurb}
+        right={<Badge tone="neutral">{items.length}</Badge>}
+        pad={false}
+      >
+        {items.length === 0 ? (
+          <p className="px-3.5 py-3 text-2xs text-ink-faint">{emptyMsg}</p>
+        ) : (
+          <ul className="divide-y divide-line-soft">
+            {items.map((n) => (
+              <li
+                key={n}
+                className="group flex items-center gap-2.5 px-3.5 py-2 transition-colors hover:bg-surface-2"
               >
-                remove
-              </button>
-            </li>
-          ))}
-          {items.length === 0 && <li className="px-2 text-xs text-ink-faint">Empty.</li>}
-        </ul>
-        <div className="flex gap-1.5">
-          <input
+                <span
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold text-ink"
+                  style={{
+                    background: `hsl(${
+                      [...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
+                    } 30% 24%)`,
+                  }}
+                >
+                  {n.slice(0, 2).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                  {n}
+                </span>
+                <IconButton
+                  icon="x"
+                  title={removeLabel}
+                  size="sm"
+                  disabled={busy || !reachable}
+                  className="opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
+                  onClick={() => onRemove(n)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex gap-1.5 border-t border-line-soft p-2.5">
+          <TextInput
             value={add[addKey]}
-            onChange={(e) => setAdd((s) => ({ ...s, [addKey]: e.target.value }))}
+            disabled={!reachable}
+            onChange={(e) => setAdd((st) => ({ ...st, [addKey]: e.target.value }))}
             onKeyDown={(e) => e.key === "Enter" && act(addAction, add[addKey])}
             placeholder={placeholder}
-            className="flex-1 rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
           />
-          <Button variant="subtle" disabled={busy} onClick={() => act(addAction, add[addKey])}>
+          <Button
+            variant="secondary"
+            icon="plus"
+            disabled={busy || !reachable || !add[addKey].trim()}
+            onClick={() => act(addAction, add[addKey])}
+          >
             Add
           </Button>
         </div>
-      </div>
+      </Card>
     );
   }
 
-  if (!lists) return <div className="text-xs text-ink-faint">Loading…</div>;
+  if (!lists)
+    return (
+      <Card>
+        <StateBlock state="loading" title="Reading the player lists…" compact />
+      </Card>
+    );
 
   return (
     <div className="space-y-3">
       {!reachable && (
-        <div className="rounded border border-warn/30 bg-warn/10 px-2 py-1 text-[11px] text-warn">
-          Lists are read-only while the server is stopped. Start it to add or remove
-          people (changes go over RCON, offline-name safe).
-        </div>
+        <Banner tone="warn" icon="lock">
+          These lists are read-only while the server is stopped. Start it to add
+          or remove people — changes go over the live console, which is safe for
+          offline usernames too.
+        </Banner>
       )}
 
-      <label className="flex items-center gap-2 rounded-lg border border-edge bg-panel p-3 text-sm">
-        <input
-          type="checkbox"
-          checked={lists.whitelistOn}
-          disabled={busy}
-          onChange={(e) => toggleWhitelist(e.target.checked)}
-          className="accent-accent"
+      <Card
+        title="Who's allowed in"
+        icon="shield"
+        tone={lists.whitelistOn ? "ok" : undefined}
+        pad={false}
+      >
+        <SettingRow
+          icon="list"
+          label="Whitelist only"
+          help={
+            lists.whitelistOn
+              ? "On — anyone not on the list below is turned away at the door."
+              : "Off — anyone with your address can join. Turn this on for a private server."
+          }
+          control={
+            <Toggle
+              checked={lists.whitelistOn}
+              disabled={busy}
+              onChange={toggleWhitelist}
+              label="Whitelist only"
+            />
+          }
         />
-        <span>
-          Whitelist enabled
-          <span className="ml-1 text-[11px] text-ink-faint">
-            only listed players may join
-          </span>
-        </span>
-      </label>
+      </Card>
 
       <Section
         title="Operators"
+        icon="crown"
+        tone="accent"
+        blurb="Trusted players who can run commands and bypass rules."
         items={lists.ops}
         addKey="op"
         addAction="op"
-        placeholder="username to op"
+        placeholder="Username to make an operator"
+        removeLabel="Remove operator"
+        emptyMsg="Nobody is an operator yet. Add yourself so you can run commands in-game."
         onRemove={(n) => act("deop", n)}
       />
       <Section
         title="Whitelist"
+        icon="list"
+        blurb="The guest list. Only matters while “Whitelist only” is on."
         items={lists.whitelist}
         addKey="white"
         addAction="whitelist-add"
-        placeholder="username to whitelist"
+        placeholder="Username to let in"
+        removeLabel="Remove from whitelist"
+        emptyMsg="Nobody on the list."
         onRemove={(n) => act("whitelist-remove", n)}
       />
       <Section
         title="Banned"
-        items={lists.banned.map((b) => (b.reason ? `${b.name} — ${b.reason}` : b.name))}
+        icon="ban"
+        tone="bad"
+        blurb="People who can't join, no matter what."
+        items={lists.banned.map((b) =>
+          b.reason ? `${b.name} — ${b.reason}` : b.name,
+        )}
         addKey="ban"
         addAction="ban"
-        placeholder="username to ban"
+        placeholder="Username to ban"
+        removeLabel="Unban"
+        emptyMsg="Nobody is banned."
         onRemove={(n) => act("pardon", n.split(" — ")[0])}
       />
 
       {error && (
-        <div className="rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <Banner tone="bad" onDismiss={() => setError(null)}>
           {error}
-        </div>
+        </Banner>
       )}
     </div>
   );

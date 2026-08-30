@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { Button } from "./ui";
+import { Button, Card } from "./ui";
 
 const COLORS: Record<string, string> = {
   "0": "#000000", "1": "#0000AA", "2": "#00AA00", "3": "#00AAAA",
@@ -77,13 +77,14 @@ export function BrandingSection({ serverId }: { serverId: string }) {
   }
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
-        Server listing (MOTD &amp; icon)
-      </div>
+    <Card
+      title="How it looks in the server list"
+      icon="image"
+      description="The description and icon your friends see before they join."
+    >
 
       {/* preview */}
-      <div className="mb-2 flex gap-2 rounded-md border border-edge bg-[#2b2b2b] p-2">
+      <div className="mb-2 flex gap-2 rounded-md border border-line bg-[#2b2b2b] p-2">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded bg-[#1b1b1b] text-[10px] text-ink-faint">
           {hasIcon ? (
             <span className="text-ok">icon set</span>
@@ -117,7 +118,7 @@ export function BrandingSection({ serverId }: { serverId: string }) {
         onChange={(e) => setMotd(e.target.value.split("\n").slice(0, 2).join("\n"))}
         rows={2}
         placeholder="Welcome to the server!  Use §a §c §l for colour/bold"
-        className="w-full resize-none rounded border border-edge bg-panel-2 p-2 font-mono text-xs text-ink outline-none focus:border-accent"
+        className="w-full resize-none rounded-md border border-line bg-surface-2 p-2.5 font-mono text-xs text-ink outline-none transition-colors focus:border-accent"
       />
       <div className="mt-1 flex flex-wrap items-center gap-1">
         {Object.entries(COLORS).map(([code, hex]) => (
@@ -133,7 +134,7 @@ export function BrandingSection({ serverId }: { serverId: string }) {
           <button
             key={c}
             onClick={() => setMotd((m) => m + "§" + c)}
-            className="rounded border border-edge px-1 text-[10px] text-ink-dim hover:text-ink"
+            className="rounded border border-line px-1 text-[10px] text-ink-dim hover:text-ink"
           >
             §{c}
           </button>
@@ -165,16 +166,16 @@ export function BrandingSection({ serverId }: { serverId: string }) {
           </Button>
         )}
       </div>
-      <p className="mt-1 text-[11px] text-ink-faint">
+      <p className="mt-1 text-2xs text-ink-faint">
         Restart the server for MOTD/icon changes to show in the multiplayer list.
       </p>
 
-      {note && <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{note}</div>}
+      {note && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{note}</div>}
       {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
           {error}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

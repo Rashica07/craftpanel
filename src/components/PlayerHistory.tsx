@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PlayerStat } from "../types";
-import { Badge, Button } from "./ui";
-import { Icon } from "./Icon";
+import { Badge, Card, IconButton } from "./ui";
 
 function dur(secs: number) {
   const h = Math.floor(secs / 3600);
@@ -39,15 +38,14 @@ export function PlayerHistory({ serverId }: { serverId: string }) {
   }, [load]);
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-          <Icon name="clock" size={13} /> Player history
-        </span>
-        <Button variant="ghost" onClick={load}>
-          Refresh
-        </Button>
-      </div>
+    <Card
+      title="Player history"
+      icon="clock"
+      description="Everyone who has ever joined, and how long they stayed."
+      right={
+        <IconButton icon="refresh" title="Refresh" size="sm" onClick={load} />
+      }
+    >
 
       {error ? (
         <div className="text-xs text-ink-faint">{error}</div>
@@ -60,18 +58,18 @@ export function PlayerHistory({ serverId }: { serverId: string }) {
       ) : (
         <ul className="space-y-1">
           {rows.map((p) => (
-            <li key={p.name} className="rounded-md bg-panel-2">
+            <li key={p.name} className="rounded-md bg-surface-2">
               <button
                 onClick={() => setOpen(open === p.name ? null : p.name)}
                 className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm"
               >
                 <span className="flex-1 truncate">{p.name}</span>
                 {p.online && <Badge tone="ok">online</Badge>}
-                <span className="text-[11px] text-ink-faint">{dur(p.totalSecs)} played</span>
-                <span className="text-[11px] text-ink-faint">· {when(p.lastSeen)}</span>
+                <span className="text-2xs text-ink-faint">{dur(p.totalSecs)} played</span>
+                <span className="text-2xs text-ink-faint">· {when(p.lastSeen)}</span>
               </button>
               {open === p.name && (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-edge px-3 py-2 text-[11px] text-ink-dim">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-line px-3 py-2 text-2xs text-ink-dim">
                   <span>First seen</span>
                   <span className="text-right">{when(p.firstSeen)}</span>
                   <span>Last seen</span>
@@ -92,9 +90,9 @@ export function PlayerHistory({ serverId }: { serverId: string }) {
           ))}
         </ul>
       )}
-      <p className="mt-1.5 text-[11px] text-ink-faint">
+      <p className="mt-1.5 text-2xs text-ink-faint">
         Built from <code>logs/</code> — names only (offline-mode safe).
       </p>
-    </div>
+    </Card>
   );
 }

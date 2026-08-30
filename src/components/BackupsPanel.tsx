@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Backup } from "../types";
-import { Badge, Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  Field,
+  ProgressBar,
+  StateBlock,
+  TextInput,
+  Tooltip,
+  cx,
+  toast,
+} from "./ui";
+import { Icon } from "./Icon";
 
 function size(bytes: number) {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
@@ -88,158 +101,210 @@ export function BackupsPanel({
   }
 
   return (
-    <div className="h-full space-y-4 overflow-y-auto pr-1">
-      <div className="rounded-lg border border-edge bg-panel p-3">
+    <div className="cp-stagger h-full space-y-3 overflow-y-auto pr-1">
+      <Card
+        title="Make a backup"
+        icon="archive"
+        description="A zip of the whole server folder — worlds, configs and mods — minus logs and caches."
+      >
         <div className="flex items-end gap-2">
-          <label className="flex-1 text-xs text-ink-dim">
-            Label (optional)
-            <input
+          <Field
+            label="Call it something (optional)"
+            className="min-w-0 flex-1"
+          >
+            <TextInput
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. before the big build"
-              className="mt-1 w-full rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
+              placeholder="before the big build"
             />
-          </label>
+          </Field>
           <Button
             variant="primary"
-            disabled={busy}
+            icon="archive"
+            className="mb-0.5"
+            loading={busy}
             onClick={() =>
               guard(async () => {
                 await api.backupNow(serverId, label);
                 setLabel("");
+                toast.ok("Backup saved");
               })
             }
           >
-            {busy ? "Working…" : "Back up now"}
+            Back up now
           </Button>
         </div>
+
         {locked && (
-          <p className="mt-2 text-[11px] text-ink-faint">
-            The server is running — a backup now still works, but stopping it first
-            guarantees a clean world save.
+          <p className="mt-2 flex items-start gap-1.5 text-2xs leading-snug text-ink-faint">
+            <Icon name="info" size={11} className="mt-px shrink-0" />
+            The server is running. Backing up now works, but stopping it first
+            guarantees the world is fully written to disk.
           </p>
         )}
         {progress && (
-          <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">
-            {progress}
+          <div className="mt-3 space-y-1.5">
+            <ProgressBar indeterminate />
+            <p className="text-2xs text-ink-faint">{progress}</p>
           </div>
         )}
-      </div>
-
-      <div className="flex items-center gap-2 text-xs text-ink-faint">
-        <span>Keep the newest</span>
-        <input
-          type="number"
-          min={0}
-          value={keep}
-          onChange={(e) => saveKeep(Number(e.target.value))}
-          className="w-16 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-center text-ink outline-none focus:border-accent"
-        />
-        <span>backups (0 = unlimited). Pre-restore backups are always kept.</span>
-      </div>
+      </Card>
 
       {error && (
-        <div className="rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <Banner tone="bad" onDismiss={() => setError(null)}>
           {error}
-        </div>
+        </Banner>
       )}
 
-      <ul className="space-y-1.5">
-        {backups?.map((b) => (
-          <li key={b.id} className="rounded-md border border-edge bg-panel-2 px-3 py-2 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 truncate">
-                {b.label ? (
-                  <span className="text-ink">{b.label}</span>
-                ) : (
-                  <span className="text-ink-dim">Backup</span>
-                )}
-                <span className="ml-2 text-[11px] text-ink-faint">
-                  {ago(b.createdAt)} · {size(b.sizeBytes)}
-                </span>
-              </div>
-              <Badge tone={TRIGGER_META[b.trigger].tone}>{TRIGGER_META[b.trigger].label}</Badge>
-            </div>
-
-            {confirmRestore === b.id ? (
-              <div className="mt-2 space-y-1.5 text-xs text-ink-dim">
-                <p>
-                  Restore this backup? The current folder is backed up and moved
-                  aside first — nothing is deleted.
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="danger"
-                    disabled={busy}
-                    onClick={() =>
-                      guard(async () => {
-                        await api.restoreBackup(serverId, b.id);
-                        setConfirmRestore(null);
-                      })
-                    }
-                  >
-                    Restore
-                  </Button>
-                  <Button variant="ghost" onClick={() => setConfirmRestore(null)}>
-                    Cancel
-                  </Button>
+      <Card
+        title="Your backups"
+        icon="clock"
+        description="Kept in craftpanel-backups/ next to the server."
+        right={
+          <Tooltip label="Older backups past this count are deleted automatically. Pre-restore safety copies are always kept.">
+            <label className="flex items-center gap-1.5 text-2xs text-ink-faint">
+              Keep newest
+              <TextInput
+                type="number"
+                min={0}
+                value={keep}
+                onChange={(e) => saveKeep(Number(e.target.value))}
+                className="w-16 text-center tabular-nums"
+              />
+            </label>
+          </Tooltip>
+        }
+        pad={false}
+      >
+        {!backups ? (
+          <StateBlock state="loading" title="Looking for backups…" compact />
+        ) : backups.length === 0 ? (
+          <StateBlock
+            state="empty"
+            icon="archive"
+            title="No backups yet"
+            message="Make one before you install a big modpack — restoring takes one click."
+            compact
+          />
+        ) : (
+          <ul className="divide-y divide-line-soft">
+            {backups.map((b) => (
+              <li key={b.id} className="px-3.5 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-faint">
+                    <Icon name="archive" size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-ink">
+                      {b.label ?? "Backup"}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-2xs text-ink-faint">
+                      <span>{ago(b.createdAt)}</span>
+                      <span className="text-ink-ghost">·</span>
+                      <span className="tabular-nums">{size(b.sizeBytes)}</span>
+                    </div>
+                  </div>
+                  <Badge tone={TRIGGER_META[b.trigger].tone}>
+                    {TRIGGER_META[b.trigger].label}
+                  </Badge>
                 </div>
-              </div>
-            ) : confirmDelete === b.id ? (
-              <div className="mt-2 flex items-center gap-2 text-xs text-ink-dim">
-                <span>Delete this backup for good?</span>
-                <Button
-                  variant="danger"
-                  disabled={busy}
-                  onClick={() =>
-                    guard(async () => {
-                      await api.deleteBackup(serverId, b.id);
-                      setConfirmDelete(null);
-                    })
-                  }
-                >
-                  Delete
-                </Button>
-                <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-1.5 flex gap-3 text-xs">
-                <button
-                  className="text-accent hover:underline disabled:opacity-40"
-                  disabled={locked || busy}
-                  title={locked ? "Stop the server first" : undefined}
-                  onClick={() => {
-                    setConfirmDelete(null);
-                    setConfirmRestore(b.id);
-                  }}
-                >
-                  Restore
-                </button>
-                <button
-                  className="text-ink-faint hover:text-bad"
-                  disabled={busy}
-                  onClick={() => {
-                    setConfirmRestore(null);
-                    setConfirmDelete(b.id);
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </li>
-        ))}
-        {backups && backups.length === 0 && (
-          <li className="px-2 py-3 text-xs text-ink-faint">
-            No backups yet. A backup is a zip of the whole server folder (worlds,
-            configs, mods) minus logs and caches, stored in{" "}
-            <code>craftpanel-backups/</code>.
-          </li>
+
+                {confirmRestore === b.id ? (
+                  <div className="cp-in mt-2.5 rounded-lg border border-warn/30 bg-warn-muted p-3">
+                    <p className="text-2xs leading-relaxed text-warn-soft">
+                      This swaps your current server folder for the contents of
+                      this backup. Before it does, CraftPanel takes a fresh
+                      safety backup of what's there now — so nothing is lost
+                      either way.
+                    </p>
+                    <div className="mt-2.5 flex gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon="rotate"
+                        loading={busy}
+                        onClick={() =>
+                          guard(async () => {
+                            await api.restoreBackup(serverId, b.id);
+                            setConfirmRestore(null);
+                            toast.ok("Restored");
+                          })
+                        }
+                      >
+                        Yes, restore it
+                      </Button>
+                      <Button
+                        variant="quiet"
+                        size="sm"
+                        onClick={() => setConfirmRestore(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : confirmDelete === b.id ? (
+                  <div className="cp-in mt-2.5 flex items-center gap-2 rounded-lg border border-bad/30 bg-bad-muted p-2.5">
+                    <span className="flex-1 text-2xs text-bad-soft">
+                      Delete this backup for good? This one really is permanent.
+                    </span>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon="trash"
+                      disabled={busy}
+                      onClick={() =>
+                        guard(async () => {
+                          await api.deleteBackup(serverId, b.id);
+                          setConfirmDelete(null);
+                          toast.show("Backup deleted");
+                        })
+                      }
+                    >
+                      Delete
+                    </Button>
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      onClick={() => setConfirmDelete(null)}
+                    >
+                      Keep
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex gap-1.5 pl-[42px]">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="rotate"
+                      disabled={locked || busy}
+                      title={locked ? "Stop the server first" : undefined}
+                      onClick={() => {
+                        setConfirmDelete(null);
+                        setConfirmRestore(b.id);
+                      }}
+                    >
+                      Restore
+                    </Button>
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      icon="trash"
+                      disabled={busy}
+                      className={cx("hover:text-bad")}
+                      onClick={() => {
+                        setConfirmRestore(null);
+                        setConfirmDelete(b.id);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
-        {!backups && <li className="px-2 py-3 text-xs text-ink-faint">Loading…</li>}
-      </ul>
+      </Card>
     </div>
   );
 }

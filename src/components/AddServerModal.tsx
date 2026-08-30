@@ -6,7 +6,7 @@ import {
   type ServerType,
   type ServerRecord,
 } from "../types";
-import { Badge, Button, Field, TextInput } from "./ui";
+import { Badge, Button, Field, IconButton, TextInput, useDismissOnEscape } from "./ui";
 
 const ALL_TYPES: ServerType[] = ["fabric", "forge", "paper", "spigot", "vanilla"];
 
@@ -71,21 +71,17 @@ export function AddServerModal({
     }
   }
 
+
+  useDismissOnEscape(busy ? undefined : onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="w-full max-w-xl rounded-xl border border-edge bg-panel shadow-2xl">
-        <header className="flex items-center justify-between border-b border-edge px-5 py-3">
-          <h2 className="text-sm font-semibold">Add a server</h2>
-          <button
-            onClick={onClose}
-            className="text-ink-faint hover:text-ink"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-[2px]">
+      <div role="dialog" aria-modal="true" className="cp-pop flex max-h-[86vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-e3">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-5 py-3.5">
+          <h2 className="font-display text-base font-semibold text-ink">Add a server</h2>
+          <IconButton icon="x" title="Close" size="sm" onClick={onClose} />
         </header>
 
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {!detection ? (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
               <p className="max-w-sm text-sm text-ink-dim">
@@ -98,7 +94,7 @@ export function AddServerModal({
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-lg border border-edge bg-panel-2 p-3">
+              <div className="rounded-lg border border-line-soft bg-surface-2 p-3.5">
                 <div className="flex items-center gap-2">
                   {detection.detected ? (
                     <Badge tone="accent">
@@ -130,7 +126,7 @@ export function AddServerModal({
               {detection.warnings.map((w, i) => (
                 <div
                   key={i}
-                  className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
+                  className="rounded-md border border-warn/30 bg-warn-muted px-3 py-2 text-xs text-warn-soft"
                 >
                   {w}
                 </div>
@@ -145,7 +141,7 @@ export function AddServerModal({
                   <select
                     value={type}
                     onChange={(e) => setType(e.target.value as ServerType)}
-                    className="w-full rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                    className="w-full h-8 rounded-md border border-line bg-surface-2 px-2.5 text-sm text-ink outline-none transition-colors focus:border-accent"
                   >
                     {ALL_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -192,13 +188,13 @@ export function AddServerModal({
           )}
 
           {error && (
-            <div className="mt-3 rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
+            <div className="mt-3 rounded-md border border-bad/30 bg-bad-muted px-3 py-2 text-xs text-bad-soft">
               {error}
             </div>
           )}
         </div>
 
-        <footer className="flex items-center justify-between gap-2 border-t border-edge px-5 py-3">
+        <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">
           <div>
             {detection && (
               <Button

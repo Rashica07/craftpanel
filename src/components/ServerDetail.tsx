@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import {
   SERVER_TYPE_META,
@@ -10,7 +10,18 @@ import {
   type ServerRecord,
   type ShareView,
 } from "../types";
-import { Badge, Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  IconButton,
+  Segmented,
+  StatusDot,
+  Tabs,
+  Tooltip,
+  cx,
+  type TabDef,
+} from "./ui";
 import { ConsoleView } from "./ConsoleView";
 import { RconPanel } from "./RconPanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -27,17 +38,18 @@ import { SecuritySection } from "./SecuritySection";
 import { HealthStrip } from "./HealthStrip";
 import { Icon } from "./Icon";
 import { cloudLeaseLabel, leaseLabel } from "./ShareSection";
+import { STATUS_TONE } from "../App";
 
 type Tab =
   | "console"
+  | "network"
   | "players"
   | "settings"
+  | "browse"
   | "mods"
-  | "backups"
-  | "files"
   | "worlds"
-  | "network"
-  | "browse";
+  | "backups"
+  | "files";
 
 function useUptime(startedAt: number | null, live: boolean) {
   const [, tick] = useState(0);
@@ -52,6 +64,97 @@ function useUptime(startedAt: number | null, live: boolean) {
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+/**
+ * The big status chip in the top bar. This is the single most-looked-at
+ * element in the app — it answers "is my server up?" from across the room,
+ * so it gets a dot, a word, and the uptime, at a size you can't miss.
+ */
+function StatusChip({
+  label,
+  tone,
+  detail,
+  busy,
+}: {
+  label: string;
+  tone: "ok" | "warn" | "bad" | "neutral";
+  detail?: string | null;
+  busy?: boolean;
+}) {
+  const ring = {
+    ok: "border-ok/35 bg-ok-muted text-ok-soft",
+    warn: "border-warn/35 bg-warn-muted text-warn-soft",
+    bad: "border-bad/35 bg-bad-muted text-bad-soft",
+    neutral: "border-line bg-surface-2 text-ink-dim",
+  }[tone];
+  return (
+    <div
+      className={cx(
+        "flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5",
+        ring,
+      )}
+    >
+      <StatusDot tone={tone} live={tone === "ok"} size={8} />
+      <span className="text-xs font-semibold">{label}</span>
+      {busy && <span className="cp-pulse text-2xs">…</span>}
+      {detail && (
+        <span className="border-l border-current/20 pl-2 text-2xs tabular-nums opacity-70">
+          {detail}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Overflow menu on the top bar — the actions you rarely want by accident. */
+function ActionMenu({
+  items,
+}: {
+  items: { icon: string; label: string; run: () => void; danger?: boolean; disabled?: boolean }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const live = items.filter((i) => !i.disabled);
+  if (!live.length) return null;
+  return (
+    <div className="relative">
+      <IconButton
+        icon="more-horizontal"
+        title="More actions"
+        variant="ghost"
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="cp-pop absolute right-0 top-full z-40 mt-1.5 min-w-48 overflow-hidden rounded-lg border border-line bg-surface-2 p-1 shadow-e3"
+          >
+            {live.map((it) => (
+              <button
+                key={it.label}
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  it.run();
+                }}
+                className={cx(
+                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors duration-[120ms]",
+                  it.danger
+                    ? "text-bad hover:bg-bad/12"
+                    : "text-ink-dim hover:bg-surface-3 hover:text-ink",
+                )}
+              >
+                <Icon name={it.icon} size={14} />
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function ServerDetail({
@@ -75,13 +178,17 @@ export function ServerDetail({
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [crash, setCrash] = useState<CrashReport | null>(null);
+  const [crashDismissed, setCrashDismissed] = useState(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const status = runtime?.status ?? "stopped";
-  const active = status === "running" || status === "starting" || status === "stopping";
+  const active =
+    status === "running" || status === "starting" || status === "stopping";
   const uptime = useUptime(runtime?.startedAt ?? null, active);
   const externalRunning = !active && !!external?.portOpen;
   const reachable = status === "running" || externalRunning;
-  const hasMods = server.server_type === "fabric" || server.server_type === "forge";
+  const hasMods =
+    server.server_type === "fabric" || server.server_type === "forge";
   const isCloud = !!server.sync_code;
   const leasedElsewhere =
     !active &&
@@ -92,6 +199,7 @@ export function ServerDetail({
     setTab("console");
     setConsoleMode("live");
     setPendingRestart(false);
+    setCrashDismissed(false);
   }, [server.id]);
 
   // reattached / external servers have no live stream — show the log file
@@ -124,7 +232,10 @@ export function ServerDetail({
     }
     let alive = true;
     const check = () =>
-      api.checkExternal(server.id).then((e) => alive && setExternal(e)).catch(() => {});
+      api
+        .checkExternal(server.id)
+        .then((e) => alive && setExternal(e))
+        .catch(() => {});
     check();
     const t = setInterval(check, 5000);
     return () => {
@@ -135,19 +246,31 @@ export function ServerDetail({
 
   useEffect(() => {
     setShowEula(false);
-    api.eulaState(server.id).then(setEulaOk).catch(() => setEulaOk(null));
+    api
+      .eulaState(server.id)
+      .then(setEulaOk)
+      .catch(() => setEulaOk(null));
   }, [server.id]);
 
   useEffect(() => {
-    api.latestCrash(server.id).then(setCrash).catch(() => setCrash(null));
+    api
+      .latestCrash(server.id)
+      .then(setCrash)
+      .catch(() => setCrash(null));
   }, [server.id, status]);
 
   useEffect(() => {
     let alive = true;
     const check = () => {
-      api.shareStatus(server.id).then((s) => alive && setShare(s)).catch(() => {});
+      api
+        .shareStatus(server.id)
+        .then((s) => alive && setShare(s))
+        .catch(() => {});
       if (server.sync_code) {
-        api.cloudStatus(server.id).then((c) => alive && setCloud(c)).catch(() => {});
+        api
+          .cloudStatus(server.id)
+          .then((c) => alive && setCloud(c))
+          .catch(() => {});
       }
     };
     check();
@@ -165,11 +288,15 @@ export function ServerDetail({
       .onSyncProgress((p) => {
         if (!p.serverId || p.serverId === server.id) {
           setSyncMsg(p.message);
-          setTimeout(() => setSyncMsg(null), 4000);
+          clearTimeout(syncTimer.current);
+          syncTimer.current = setTimeout(() => setSyncMsg(null), 4000);
         }
       })
       .then((f) => (un = f));
-    return () => un?.();
+    return () => {
+      un?.();
+      clearTimeout(syncTimer.current);
+    };
   }, [server.id]);
 
   useEffect(() => {
@@ -220,87 +347,90 @@ export function ServerDetail({
     });
   }
 
-  const tabs: { id: Tab; label: string; icon: string }[] = [
+  /* Tab order is a priority order: the thing you do most is leftmost, and
+     Network sits second because "how do my friends join" is the question the
+     app exists to answer. */
+  const tabs: TabDef[] = [
     { id: "console", label: "Console", icon: "terminal" },
+    { id: "network", label: "Network", icon: "signal" },
     { id: "players", label: "Players", icon: "users" },
     { id: "settings", label: "Settings", icon: "sliders" },
-    ...(hasMods ? [{ id: "mods" as Tab, label: "Mods", icon: "package" }] : []),
-    { id: "browse", label: "Browse", icon: "search" },
+    { id: "browse", label: "Add-ons", icon: "sparkle" },
+    ...(hasMods ? [{ id: "mods", label: "Mods", icon: "package" }] : []),
     { id: "worlds", label: "Worlds", icon: "globe" },
-    { id: "network", label: "Network", icon: "signal" },
-    { id: "files", label: "Files", icon: "folder" },
     { id: "backups", label: "Backups", icon: "archive" },
+    { id: "files", label: "Files", icon: "folder" },
   ];
 
+  const statusTone = externalRunning ? "ok" : STATUS_TONE[status];
+  const statusLabel = externalRunning ? "Running elsewhere" : st.label;
+
   return (
-    <div className="flex h-full flex-col p-6">
-      {/* header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{server.name}</h1>
-          <div className="mt-1.5 flex items-center gap-2">
-            <Badge tone={externalRunning ? "ok" : st.tone}>
-              {externalRunning ? "Running (external)" : st.label}
-            </Badge>
-            <Badge tone="accent">{meta.label}</Badge>
-            {server.mc_version && <Badge tone="neutral">MC {server.mc_version}</Badge>}
-            {runtime?.reattached && <Badge tone="neutral">⟲ Reattached</Badge>}
-            {isCloud && cloud && (
-              <Badge tone={cloudLeaseLabel(cloud).tone}>☁ {cloudLeaseLabel(cloud).text}</Badge>
-            )}
-            {!isCloud && share?.shared && (
-              <Badge tone={leaseLabel(share).tone}>⇄ {leaseLabel(share).text}</Badge>
-            )}
-            {active && runtime?.pid && (
-              <span className="text-xs text-ink-faint">
-                pid {runtime.pid}
-                {uptime ? ` · up ${uptime}` : ""}
-              </span>
-            )}
+    <div className="flex h-full flex-col">
+      {/* ─────────────────────── top bar ─────────────────────── */}
+      <header className="shrink-0 border-b border-line bg-surface">
+        <div className="flex items-start gap-4 px-6 pb-3.5 pt-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="cp-display truncate text-xl text-ink">
+              {server.name}
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge tone="accent">{meta.label}</Badge>
+              {server.mc_version && (
+                <Badge tone="neutral">MC {server.mc_version}</Badge>
+              )}
+              {runtime?.reattached && (
+                <Tooltip label="CraftPanel found this server already running and adopted it">
+                  <Badge tone="neutral" icon="rotate">
+                    Reattached
+                  </Badge>
+                </Tooltip>
+              )}
+              {isCloud && cloud && (
+                <Badge tone={cloudLeaseLabel(cloud).tone} icon="cloud">
+                  {cloudLeaseLabel(cloud).text}
+                </Badge>
+              )}
+              {!isCloud && share?.shared && (
+                <Badge tone={leaseLabel(share).tone} icon="share">
+                  {leaseLabel(share).text}
+                </Badge>
+              )}
+              {active && runtime?.pid && (
+                <span className="font-mono text-2xs text-ink-faint">
+                  pid {runtime.pid}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          {active ? (
-            <>
+
+          <div className="flex shrink-0 items-center gap-2 pt-0.5">
+            <StatusChip
+              label={statusLabel}
+              tone={statusTone}
+              detail={uptime ? `up ${uptime}` : null}
+              busy={status === "starting" || status === "stopping"}
+            />
+
+            {active ? (
               <Button
-                variant="ghost"
-                className="flex items-center gap-1.5"
+                variant="secondary"
+                size="lg"
+                icon="stop"
                 onClick={() => run(() => api.stopServer(server.id))}
                 disabled={busy || status === "stopping"}
+                loading={busy && status === "stopping"}
               >
-                <Icon name="stop" size={13} /> Stop
+                Stop
               </Button>
+            ) : externalRunning || leasedElsewhere ? (
               <Button
-                variant="danger"
-                onClick={() => run(() => api.killServer(server.id))}
-                disabled={busy}
-              >
-                Kill
-              </Button>
-            </>
-          ) : externalRunning || leasedElsewhere ? (
-            <>
-              {externalRunning && (
-                <Button
-                  variant="danger"
-                  onClick={() =>
-                    run(async () => {
-                      await api.stopOnPort(server.id);
-                      const e = await api.checkExternal(server.id);
-                      setExternal(e);
-                    })
-                  }
-                  disabled={busy}
-                  className="flex items-center gap-1.5"
-                  title={`Kill the Minecraft server holding port ${external?.port}`}
-                >
-                  <Icon name="stop" size={13} /> Stop it
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                className="flex items-center gap-1.5"
-                onClick={() => run(() => api.startServer(server.id, { force: true }))}
+                variant="secondary"
+                size="lg"
+                icon="play"
+                onClick={() =>
+                  run(() => api.startServer(server.id, { force: true }))
+                }
                 disabled={busy}
                 title={
                   leasedElsewhere
@@ -308,159 +438,280 @@ export function ServerDetail({
                     : "A server is already listening on this port"
                 }
               >
-                <Icon name="play" size={13} /> Start anyway
+                Start anyway
               </Button>
-            </>
-          ) : (
-            <Button
-              variant="primary"
-              className="flex items-center gap-1.5"
-              onClick={onStartClick}
-              disabled={busy}
-            >
-              <Icon name="play" size={13} /> Start
-            </Button>
-          )}
-        </div>
-      </div>
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                icon="play"
+                onClick={onStartClick}
+                disabled={busy}
+                loading={busy}
+              >
+                Start
+              </Button>
+            )}
 
-      {/* banners */}
-      {showEula && (
-        <div className="mt-3 rounded-md border border-accent/30 bg-accent-muted px-3 py-2.5 text-xs">
-          <p className="text-ink">
-            To run a Minecraft server you must agree to the{" "}
-            <a
-              href="https://aka.ms/MinecraftEULA"
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent underline"
-            >
-              Minecraft EULA
-            </a>
-            . CraftPanel will write <code>eula=true</code> and start the server.
-          </p>
-          <div className="mt-2 flex gap-2">
-            <Button variant="primary" onClick={agreeAndStart} disabled={busy}>
-              I agree — start
-            </Button>
-            <Button variant="ghost" onClick={() => setShowEula(false)} disabled={busy}>
-              Cancel
-            </Button>
+            <ActionMenu
+              items={[
+                {
+                  icon: "refresh",
+                  label: "Restart server",
+                  run: restart,
+                  disabled: !active || busy,
+                },
+                {
+                  icon: "power",
+                  label: "Force kill",
+                  run: () => run(() => api.killServer(server.id)),
+                  danger: true,
+                  disabled: !active || busy,
+                },
+                {
+                  icon: "stop",
+                  label: `Stop whatever holds port ${external?.port ?? ""}`,
+                  run: () =>
+                    run(async () => {
+                      await api.stopOnPort(server.id);
+                      setExternal(await api.checkExternal(server.id));
+                    }),
+                  danger: true,
+                  disabled: !externalRunning || busy,
+                },
+              ]}
+            />
           </div>
         </div>
-      )}
-      {externalRunning && (
-        <div className="mt-3 rounded-md border border-ok/30 bg-ok/10 px-3 py-2 text-xs text-ok">
-          A Minecraft server is already listening on port {external?.port}, started
-          outside CraftPanel (or left over from a create/first-boot). Console isn't
-          captured for it; the Players tab still reaches it over RCON. Use{" "}
-          <strong>Stop it</strong> to end that process, then Start normally.
+
+        <div className="px-6">
+          <Tabs
+            tabs={tabs}
+            value={tab}
+            onChange={(id) => setTab(id as Tab)}
+            className="border-b-0"
+          />
         </div>
-      )}
-      {runtime?.needsEula && !showEula && (
-        <div className="mt-3 flex items-center justify-between rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
-          <span>The server stopped because the Minecraft EULA isn't accepted.</span>
-          <Button variant="subtle" onClick={agreeAndStart} disabled={busy}>
-            Accept EULA &amp; start
-          </Button>
-        </div>
-      )}
-      {status === "crashed" && !runtime?.needsEula && (
-        <div className="mt-3 rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
-          <div>
-            Server crashed
-            {runtime?.exitCode != null ? ` (exit code ${runtime.exitCode})` : ""}.
-          </div>
-          {crash && (
-            <div className="mt-1 space-y-0.5 text-[11px]">
-              {crash.headline && <div className="font-mono">{crash.headline}</div>}
-              {crash.suspect && (
-                <div>
-                  Likely culprit: <span className="font-mono text-warn">{crash.suspect}</span>
-                </div>
-              )}
-              <div className="text-ink-faint">
-                from {crash.file} — open the Files tab → <code>crash-reports/</code> for the full report
-              </div>
-            </div>
+      </header>
+
+      {/* ─────────────────────── banners ─────────────────────── */}
+      {(showEula ||
+        externalRunning ||
+        runtime?.needsEula ||
+        (status === "crashed" && !crashDismissed) ||
+        syncMsg ||
+        (pendingRestart && (active || externalRunning)) ||
+        error) && (
+        <div className="shrink-0 space-y-2 px-6 pt-4">
+          {showEula && (
+            <Banner
+              tone="accent"
+              icon="book"
+              title="One-time agreement"
+              actions={
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={agreeAndStart}
+                    disabled={busy}
+                  >
+                    I agree — start
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    onClick={() => setShowEula(false)}
+                    disabled={busy}
+                  >
+                    Not now
+                  </Button>
+                </>
+              }
+            >
+              Minecraft servers require you to accept the{" "}
+              <a
+                href="https://aka.ms/MinecraftEULA"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Minecraft EULA
+              </a>
+              . We'll write <code>eula=true</code> and start the server.
+            </Banner>
           )}
-        </div>
-      )}
-      {syncMsg && (
-        <div className="mt-3 rounded-md border border-accent/30 bg-accent-muted px-3 py-2 text-xs text-ink">
-          ☁ {syncMsg}
-        </div>
-      )}
-      {pendingRestart && (active || externalRunning) && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-          <span>
-            Changes saved to <code>server.properties</code> — the running server
-            won't pick them up until it's restarted.
-          </span>
-          {status === "running" ? (
-            <Button variant="subtle" onClick={restart} disabled={busy}>
-              Restart server
-            </Button>
-          ) : externalRunning ? (
-            <span className="shrink-0 text-ink-faint">restart it in your terminal</span>
-          ) : null}
-        </div>
-      )}
-      {error && (
-        <div className="mt-3 rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
-          {error}
-        </div>
-      )}
 
-      {/* tabs */}
-      <div className="mt-4 flex gap-1 border-b border-edge">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm transition-colors ${
-              tab === t.id
-                ? "border-accent text-ink"
-                : "border-transparent text-ink-faint hover:text-ink"
-            }`}
-          >
-            <Icon name={t.icon} size={14} />
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-3 min-h-0 flex-1">
-        {tab === "console" && (
-          <div className="flex h-full flex-col">
-            <HealthStrip serverId={server.id} live={active || externalRunning} />
-            <div className="mb-2 flex w-max rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
-              {(["live", "log"] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setConsoleMode(m)}
-                  className={`rounded px-2 py-1 ${
-                    consoleMode === m ? "bg-accent text-black" : "text-ink-dim hover:text-ink"
-                  }`}
+          {externalRunning && (
+            <Banner
+              tone="ok"
+              icon="alert"
+              title={`Something else is already using port ${external?.port}`}
+              actions={
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon="stop"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await api.stopOnPort(server.id);
+                      setExternal(await api.checkExternal(server.id));
+                    })
+                  }
                 >
-                  {m === "live" ? "Live console" : "Log file"}
-                </button>
-              ))}
+                  Stop it
+                </Button>
+              }
+            >
+              A Minecraft server started outside CraftPanel (or left over from a
+              first boot) holds this port. The live console can't capture it, but
+              Players still works over RCON. Stop it, then press Start.
+            </Banner>
+          )}
+
+          {runtime?.needsEula && !showEula && (
+            <Banner
+              tone="warn"
+              title="The server stopped — EULA not accepted"
+              actions={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={agreeAndStart}
+                  disabled={busy}
+                >
+                  Accept &amp; start
+                </Button>
+              }
+            >
+              Minecraft won't run until the EULA is accepted once.
+            </Banner>
+          )}
+
+          {status === "crashed" && !runtime?.needsEula && !crashDismissed && (
+            <Banner
+              tone="bad"
+              title={`Server crashed${
+                runtime?.exitCode != null ? ` (exit code ${runtime.exitCode})` : ""
+              }`}
+              onDismiss={() => setCrashDismissed(true)}
+              actions={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="play"
+                  onClick={onStartClick}
+                  disabled={busy}
+                >
+                  Start again
+                </Button>
+              }
+            >
+              {crash ? (
+                <div className="mt-1 space-y-1">
+                  {crash.headline && (
+                    <div className="rounded-sm bg-black/25 px-2 py-1 font-mono text-2xs text-ink-dim">
+                      {crash.headline}
+                    </div>
+                  )}
+                  {crash.suspect && (
+                    <div>
+                      Most likely cause:{" "}
+                      <span className="font-mono text-warn-soft">
+                        {crash.suspect}
+                      </span>
+                    </div>
+                  )}
+                  <div className="text-ink-faint">
+                    Full report in <strong>Files → crash-reports/</strong> (
+                    <span className="font-mono">{crash.file}</span>)
+                  </div>
+                </div>
+              ) : (
+                "Check the Console tab for the last few lines before it went down."
+              )}
+            </Banner>
+          )}
+
+          {syncMsg && (
+            <Banner tone="info" icon="cloud">
+              {syncMsg}
+            </Banner>
+          )}
+
+          {pendingRestart && (active || externalRunning) && (
+            <Banner
+              tone="warn"
+              icon="refresh"
+              title="Restart to apply your changes"
+              actions={
+                status === "running" ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="refresh"
+                    onClick={restart}
+                    disabled={busy}
+                  >
+                    Restart now
+                  </Button>
+                ) : undefined
+              }
+            >
+              Settings are saved, but a running server keeps the old values in
+              memory until it restarts.
+            </Banner>
+          )}
+
+          {error && (
+            <Banner tone="bad" onDismiss={() => setError(null)}>
+              <span className="break-words">{error}</span>
+            </Banner>
+          )}
+        </div>
+      )}
+
+      {/* ─────────────────────── panel ─────────────────────── */}
+      <div key={tab} className="cp-in min-h-0 flex-1 px-6 pb-6 pt-4">
+        {tab === "console" && (
+          <div className="flex h-full flex-col gap-3">
+            <HealthStrip serverId={server.id} live={active || externalRunning} />
+            <div className="flex items-center gap-2">
+              <Segmented
+                value={consoleMode}
+                onChange={setConsoleMode}
+                options={[
+                  { value: "live", label: "Live console", icon: "terminal" },
+                  { value: "log", label: "Log file", icon: "file" },
+                ]}
+              />
+              {runtime?.reattached && consoleMode === "live" && (
+                <span className="text-2xs text-ink-faint">
+                  This server was adopted, so there's no live stream — use the
+                  log file.
+                </span>
+              )}
             </div>
             <div className="min-h-0 flex-1">
               {consoleMode === "live" ? (
                 <ConsoleView
                   serverId={server.id}
                   canSend={
-                    (status === "running" || status === "starting") && !runtime?.reattached
+                    (status === "running" || status === "starting") &&
+                    !runtime?.reattached
                   }
                 />
               ) : (
-                <LogView serverId={server.id} live={active || externalRunning} />
+                <LogView
+                  serverId={server.id}
+                  live={active || externalRunning}
+                />
               )}
             </div>
           </div>
         )}
+
         {tab === "players" && (
           <div className="h-full space-y-3 overflow-y-auto pr-1">
             <RconPanel
@@ -477,6 +728,7 @@ export function ServerDetail({
             <SecuritySection serverId={server.id} />
           </div>
         )}
+
         {tab === "settings" && (
           <SettingsPanel
             server={server}
@@ -494,12 +746,18 @@ export function ServerDetail({
           />
         )}
         {tab === "worlds" && (
-          <WorldsPanel serverId={server.id} locked={active || externalRunning} />
+          <WorldsPanel
+            serverId={server.id}
+            locked={active || externalRunning}
+          />
         )}
         {tab === "network" && <NetworkPanel serverId={server.id} />}
         {tab === "files" && <FilesPanel serverId={server.id} />}
         {tab === "backups" && (
-          <BackupsPanel serverId={server.id} locked={active || externalRunning} />
+          <BackupsPanel
+            serverId={server.id}
+            locked={active || externalRunning}
+          />
         )}
       </div>
     </div>

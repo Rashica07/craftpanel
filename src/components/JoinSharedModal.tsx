@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ServerRecord } from "../types";
-import { Button, Field, TextInput } from "./ui";
+import { Button, Field, IconButton, TextInput, useDismissOnEscape } from "./ui";
 import { R2SetupModal } from "./R2SetupModal";
 
 type Mode = "cloud" | "folder";
@@ -52,26 +52,28 @@ export function JoinSharedModal({
     }
   }
 
+
+  useDismissOnEscape(busy ? undefined : onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="w-full max-w-md rounded-xl border border-edge bg-panel shadow-2xl">
-        <header className="flex items-center justify-between border-b border-edge px-5 py-3">
-          <h2 className="text-sm font-semibold">Join a shared server</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-[2px]">
+      <div role="dialog" aria-modal="true" className="cp-pop flex max-h-[86vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-e3">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-5 py-3.5">
+          <h2 className="font-display text-base font-semibold text-ink">Join a shared server</h2>
           {!busy && (
-            <button onClick={onClose} className="text-ink-faint hover:text-ink">
-              ✕
-            </button>
+            <IconButton icon="x" title="Close" size="sm" onClick={onClose} />
           )}
         </header>
 
-        <div className="space-y-4 px-5 py-4">
-          <div className="flex rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <div className="flex rounded-md border border-line bg-surface-2 p-0.5 text-xs">
             {(["cloud", "folder"] as Mode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
-                className={`flex-1 rounded px-2 py-1 capitalize transition-colors ${
-                  mode === m ? "bg-accent text-black" : "text-ink-dim hover:text-ink"
+                className={`flex-1 rounded-sm px-2 py-1 font-medium capitalize transition-colors duration-[120ms] ${
+                  mode === m
+                    ? "bg-surface-4 text-ink shadow-e1"
+                    : "text-ink-faint hover:text-ink"
                 }`}
               >
                 {m === "cloud" ? "Cloud (code)" : "Synced folder"}
@@ -119,16 +121,16 @@ export function JoinSharedModal({
           )}
 
           {progress && (
-            <div className="rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{progress}</div>
+            <div className="rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{progress}</div>
           )}
           {error && (
-            <div className="rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
+            <div className="rounded-md border border-bad/30 bg-bad-muted px-3 py-2 text-xs text-bad-soft">
               {error}
             </div>
           )}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-edge px-5 py-3">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

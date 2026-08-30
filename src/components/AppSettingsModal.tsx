@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { AppSettings, UpdateCheck } from "../types";
-import { Button, Field, TextInput, Toggle } from "./ui";
+import { Button, Field, IconButton, TextInput, Toggle, useDismissOnEscape } from "./ui";
 import { Icon } from "./Icon";
 
 const DEFAULTS: AppSettings = {
@@ -54,18 +54,27 @@ export function AppSettingsModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+
+  useDismissOnEscape(busy ? undefined : onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="cp-in flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-edge bg-panel shadow-2xl">
-        <header className="flex items-center gap-2 border-b border-edge-soft px-5 py-3">
-          <Icon name="gear" size={16} className="text-ink-faint" />
-          <h2 className="flex-1 text-sm font-semibold">CraftPanel settings</h2>
-          <button onClick={onClose} className="text-ink-faint hover:text-ink">
-            <Icon name="x" size={16} />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-[2px]">
+      <div role="dialog" aria-modal="true" className="cp-pop flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-e3">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-5 py-3.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-muted text-accent-soft">
+            <Icon name="gear" size={16} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-base font-semibold text-ink">
+              CraftPanel settings
+            </h2>
+            <p className="mt-0.5 text-xs text-ink-faint">
+              Defaults for new servers, and how the app behaves.
+            </p>
+          </div>
+          <IconButton icon="x" title="Close" size="sm" onClick={onClose} />
         </header>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
           <Field label="Default Java" hint="used for new servers — blank = whatever's on PATH">
             <TextInput
               value={s.defaultJava}
@@ -94,7 +103,7 @@ export function AppSettingsModal({ onClose }: { onClose: () => void }) {
           <label className="flex items-start justify-between gap-3">
             <span className="text-sm">
               Keep servers running when I quit CraftPanel
-              <span className="mt-0.5 block text-[11px] text-ink-faint">
+              <span className="mt-0.5 block text-2xs text-ink-faint">
                 Quitting won't stop your servers — the app re-adopts them next launch.
                 (Closing the window already keeps them; this covers Quit.)
               </span>
@@ -108,14 +117,14 @@ export function AppSettingsModal({ onClose }: { onClose: () => void }) {
           <label className="flex items-start justify-between gap-3">
             <span className="text-sm">
               Expert mode
-              <span className="mt-0.5 block text-[11px] text-ink-faint">
+              <span className="mt-0.5 block text-2xs text-ink-faint">
                 Shows the raw <code>server.properties</code> editor and other power tools.
               </span>
             </span>
             <Toggle checked={s.expertMode} onChange={(v) => set("expertMode", v)} />
           </label>
 
-          <div className="border-t border-edge-soft pt-4">
+          <div className="border-t border-line-soft pt-4">
             <Field label="Updates" hint="your GitHub repo, e.g. yourname/craftpanel">
               <TextInput
                 value={s.githubRepo}
@@ -129,24 +138,24 @@ export function AppSettingsModal({ onClose }: { onClose: () => void }) {
               </Button>
               {upd &&
                 (upd.unavailable ? (
-                  <span className="text-[11px] text-ink-faint">{upd.unavailable}</span>
+                  <span className="text-2xs text-ink-faint">{upd.unavailable}</span>
                 ) : upd.newer ? (
                   <a
                     href={upd.url ?? "#"}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[11px] text-accent underline"
+                    className="text-2xs text-accent underline"
                   >
                     {upd.latest} available (you have {upd.current}) →
                   </a>
                 ) : (
-                  <span className="text-[11px] text-ok">Up to date ({upd.current}).</span>
+                  <span className="text-2xs text-ok">Up to date ({upd.current}).</span>
                 ))}
             </div>
           </div>
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-edge-soft px-5 py-3">
+        <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>

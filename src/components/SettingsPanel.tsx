@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { ServerRecord, ServerSettings, SettingField } from "../types";
-import { Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  Modal,
+  Segmented,
+  Select,
+  SettingRow,
+  StateBlock,
+  TextInput,
+  Toggle,
+  Tooltip,
+  cx,
+  toast,
+} from "./ui";
+import { Icon } from "./Icon";
 import { RamSlider } from "./RamSlider";
 import { ShareSection } from "./ShareSection";
 import { BrandingSection } from "./BrandingSection";
@@ -10,6 +26,144 @@ import { JvmSection } from "./JvmSection";
 import { MgmtSection } from "./MgmtSection";
 
 type View = "common" | "advanced" | "raw";
+
+/**
+ * Every settings row gets an icon. server.properties keys are cryptic, and a
+ * glyph is the cheapest way to make a list of 30 of them scannable — you find
+ * "the world one" by shape long before you read the label.
+ */
+const KEY_ICON: Record<string, string> = {
+  motd: "type",
+  "max-players": "users",
+  difficulty: "swords",
+  gamemode: "gamepad",
+  "force-gamemode": "gamepad",
+  pvp: "swords",
+  hardcore: "heart",
+  "online-mode": "shield",
+  "white-list": "list",
+  "enforce-whitelist": "list",
+  "spawn-protection": "shield",
+  "view-distance": "eye",
+  "simulation-distance": "activity",
+  "level-seed": "dice",
+  "level-name": "map",
+  "level-type": "grass",
+  "allow-nether": "globe",
+  "allow-flight": "arrow-up",
+  "enable-command-block": "terminal",
+  "server-port": "hash",
+  "query.port": "hash",
+  "rcon.port": "hash",
+  "enable-rcon": "terminal",
+  "enable-query": "search",
+  "spawn-monsters": "creeper",
+  "spawn-animals": "grass",
+  "spawn-npcs": "user",
+  "max-world-size": "globe",
+  "resource-pack": "package",
+  "player-idle-timeout": "clock",
+  "op-permission-level": "crown",
+  "max-tick-time": "gauge",
+  "network-compression-threshold": "activity",
+  "entity-broadcast-range-percentage": "activity",
+  "sync-chunk-writes": "hard-drive",
+  "use-native-transport": "cpu",
+  "prevent-proxy-connections": "shield",
+  "broadcast-console-to-ops": "terminal",
+  "require-resource-pack": "package",
+  "hide-online-players": "eye-off",
+  "server-ip": "router",
+  "generate-structures": "cube",
+  "function-permission-level": "crown",
+  "rate-limit": "gauge",
+  "text-filtering-config": "type",
+};
+
+function iconFor(f: SettingField) {
+  return (
+    KEY_ICON[f.key] ??
+    ({ bool: "check", int: "hash", enum: "list", text: "type" }[f.kind] ?? "sliders")
+  );
+}
+
+/** One server.properties key, rendered as icon · label · help · control. */
+function FieldRow({
+  field,
+  value,
+  dirty,
+  onChange,
+}: {
+  field: SettingField;
+  value: string;
+  dirty: boolean;
+  onChange: (key: string, v: string) => void;
+}) {
+  const id = `set-${field.key}`;
+
+  const control =
+    field.kind === "bool" ? (
+      <Toggle
+        id={id}
+        checked={value === "true"}
+        label={field.label}
+        onChange={(v) => onChange(field.key, v ? "true" : "false")}
+      />
+    ) : field.kind === "enum" ? (
+      <Select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(field.key, e.target.value)}
+        className="w-40 capitalize"
+      >
+        {field.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </Select>
+    ) : (
+      <TextInput
+        id={id}
+        type={field.kind === "int" ? "number" : "text"}
+        value={value}
+        onChange={(e) => onChange(field.key, e.target.value)}
+        className={field.kind === "int" ? "w-24 text-right tabular-nums" : "w-56"}
+      />
+    );
+
+  return (
+    <div className={cx("relative", dirty && "bg-accent-muted/40")}>
+      {dirty && (
+        <span className="absolute inset-y-0 left-0 w-[2px] bg-accent" />
+      )}
+      <SettingRow
+        icon={iconFor(field)}
+        htmlFor={id}
+        label={
+          <span className="flex items-center gap-1.5">
+            {field.label}
+            {dirty && (
+              <Badge tone="accent" size="sm">
+                edited
+              </Badge>
+            )}
+            <Tooltip label={<span className="font-mono">{field.key}</span>}>
+              <Icon
+                name="info"
+                size={11}
+                className="text-ink-ghost hover:text-ink-faint"
+              />
+            </Tooltip>
+          </span>
+        }
+        help={field.help}
+        note={field.note}
+        control={control}
+      />
+    </div>
+  );
+}
 
 export function SettingsPanel({
   server,
@@ -26,20 +180,23 @@ export function SettingsPanel({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [view, setView] = useState<View>("common");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ram, setRam] = useState(server.ram_mb);
   const [keepAwake, setKeepAwake] = useState(server.keep_awake);
   const [expert, setExpert] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [rawFilter, setRawFilter] = useState("");
 
   useEffect(() => {
-    api.appSettingsGet().then((s) => setExpert(s.expertMode)).catch(() => {});
+    api
+      .appSettingsGet()
+      .then((s) => setExpert(s.expertMode))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!expert && view === "raw") setView("advanced");
   }, [expert, view]);
-  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -53,15 +210,20 @@ export function SettingsPanel({
 
   useEffect(() => {
     setError(null);
-    setMsg(null);
     load();
   }, [load]);
   useEffect(() => setRam(server.ram_mb), [server.id, server.ram_mb]);
-  useEffect(() => setKeepAwake(server.keep_awake), [server.id, server.keep_awake]);
+  useEffect(
+    () => setKeepAwake(server.keep_awake),
+    [server.id, server.keep_awake],
+  );
 
   function toggleKeepAwake(next: boolean) {
     setKeepAwake(next);
-    api.setKeepAwake(server.id, next).then(onServersChanged).catch((e) => setError(String(e)));
+    api
+      .setKeepAwake(server.id, next)
+      .then(onServersChanged)
+      .catch((e) => setError(String(e)));
   }
 
   const dirty = Object.keys(draft).length > 0;
@@ -71,17 +233,22 @@ export function SettingsPanel({
   async function save() {
     setBusy(true);
     setError(null);
-    setMsg(null);
     try {
       const r = await api.applySettings(
         server.id,
         Object.entries(draft) as [string, string][],
       );
-      setMsg(r.changed.length ? `Saved ${r.changed.join(", ")}.` : "No changes.");
+      toast.ok(
+        r.changed.length
+          ? `Saved ${r.changed.length} change${r.changed.length > 1 ? "s" : ""}`
+          : "Nothing to save",
+        r.changed.join(", ") || undefined,
+      );
       if (r.restartRequired) onNeedsRestart();
       load();
     } catch (e) {
       setError(String(e));
+      toast.bad("Couldn't save", String(e));
     } finally {
       setBusy(false);
     }
@@ -89,7 +256,10 @@ export function SettingsPanel({
 
   function saveRam(mb: number) {
     setRam(mb);
-    api.setServerRam(server.id, mb).then(onServersChanged).catch((e) => setError(String(e)));
+    api
+      .setServerRam(server.id, mb)
+      .then(onServersChanged)
+      .catch((e) => setError(String(e)));
   }
 
   const fields: SettingField[] =
@@ -99,209 +269,282 @@ export function SettingsPanel({
         ? (settings?.advanced ?? [])
         : [];
 
+  const rawRows = (settings?.all ?? []).filter(([k]) =>
+    rawFilter ? k.toLowerCase().includes(rawFilter.toLowerCase()) : true,
+  );
+
   return (
-    <div className="h-full space-y-4 overflow-y-auto pr-1">
-      <div className="rounded-lg border border-edge bg-panel p-3">
-        <RamSlider valueMb={ram} onChange={saveRam} disabled={locked} />
-        {locked && (
-          <p className="mt-2 text-[11px] text-ink-faint">Stop the server to change memory.</p>
-        )}
-        <label className="mt-3 flex items-start gap-2 border-t border-edge pt-3 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={keepAwake}
-            onChange={(e) => toggleKeepAwake(e.target.checked)}
-            className="mt-0.5 accent-accent"
-          />
-          <span>
-            Keep this computer awake while the server runs
-            <span className="mt-0.5 block text-[11px] leading-snug text-ink-faint">
-              Stops idle-sleep so the server stays up when you step away. Takes effect on
-              the next start. macOS: with the lid shut it still sleeps unless plugged in.
-              Windows support is coming.
-            </span>
-          </span>
-        </label>
-      </div>
-
-      <BrandingSection serverId={server.id} />
-
-      <AutomationSection serverId={server.id} />
-
-      <JvmSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
-
-      <MgmtSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
-
-      <ShareSection server={server} onServersChanged={onServersChanged} />
-
-      {!settings ? (
-        <div className="text-xs text-ink-faint">Loading settings…</div>
-      ) : !settings.present ? (
-        <div className="rounded-lg border border-edge bg-panel p-3 text-xs text-ink-faint">
-          No <code>server.properties</code> yet. Start the server once and it'll
-          generate one.
-        </div>
-      ) : (
-        <>
-          <div className="flex rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
-            {(["common", "advanced", ...(expert ? ["raw"] : [])] as View[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`flex-1 rounded px-2 py-1 capitalize transition-colors ${
-                  view === v ? "bg-accent text-black" : "text-ink-dim hover:text-ink"
-                }`}
-              >
-                {v === "common" ? "Basics" : v === "advanced" ? "Advanced" : "Raw"}
-              </button>
-            ))}
-          </div>
-
-          {view === "raw" ? (
-            <div className="space-y-1 rounded-lg border border-edge bg-panel-2 p-2">
-              <p className="pb-1 text-[11px] text-ink-faint">
-                Every key in the file. Careful — no validation here.
-              </p>
-              {settings.all.map(([k, v]) => (
-                <div key={k} className="flex items-center gap-2">
-                  <span className="w-56 shrink-0 truncate font-mono text-[11px] text-ink-faint">
-                    {k}
-                  </span>
-                  <input
-                    value={val(k, v)}
-                    onChange={(e) => edit(k, e.target.value)}
-                    className="flex-1 rounded border border-edge bg-panel px-2 py-1 font-mono text-xs text-ink outline-none focus:border-accent"
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {view === "advanced" && (
-                <p className="text-[11px] text-ink-faint">
-                  The knobs that actually move performance and behaviour. Hover a
-                  label for what it does.
-                </p>
-              )}
-              {fields.map((f) => (
-                <FieldRow key={f.key} field={f} value={val(f.key, f.value)} onChange={edit} />
-              ))}
-            </div>
+    <div className="relative h-full overflow-y-auto pr-1">
+      <div className="cp-stagger space-y-3 pb-24">
+        {/* ── this computer ─────────────────────────────────────────── */}
+        <Card
+          title="Machine"
+          icon="cpu"
+          description="How much of this computer the server is allowed to use."
+        >
+          <RamSlider valueMb={ram} onChange={saveRam} disabled={locked} />
+          {locked && (
+            <p className="mt-2 flex items-center gap-1.5 text-2xs text-ink-faint">
+              <Icon name="lock" size={11} />
+              Stop the server to change its memory.
+            </p>
           )}
-
-          <div className="sticky bottom-0 flex items-center gap-2 bg-[#0f1013] py-2">
-            <Button variant="primary" onClick={save} disabled={busy || !dirty}>
-              {busy ? "Saving…" : dirty ? "Save changes" : "Saved"}
-            </Button>
-            {dirty && (
-              <Button variant="ghost" onClick={() => setDraft({})} disabled={busy}>
-                Discard
-              </Button>
-            )}
-            {dirty && (
-              <span className="text-[11px] text-ink-faint">
-                {Object.keys(draft).length} unsaved
-              </span>
-            )}
+          <div className="-mx-3.5 mt-3 border-t border-line-soft">
+            <SettingRow
+              icon="sun"
+              label="Keep this computer awake while the server runs"
+              help="Stops idle-sleep so friends don't get dropped when you walk away. Applies on the next start. On macOS a closed lid still sleeps unless you're plugged in; Windows support is coming."
+              control={<Toggle checked={keepAwake} onChange={toggleKeepAwake} />}
+            />
           </div>
-        </>
-      )}
+        </Card>
 
-      {msg && <div className="rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{msg}</div>}
-      {error && (
-        <div className="rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
-          {error}
-        </div>
-      )}
+        <BrandingSection serverId={server.id} />
+        <AutomationSection serverId={server.id} />
+        <JvmSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
+        <MgmtSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
+        <ShareSection server={server} onServersChanged={onServersChanged} />
 
-      <div className="space-y-1 border-t border-edge pt-3 text-xs text-ink-faint">
-        <div className="break-all">
-          Folder: <span className="font-mono">{server.path}</span>
-        </div>
-        <div>
-          Launch: <span className="font-mono">{server.launch_target}</span>
-        </div>
-      </div>
+        {/* ── server.properties ─────────────────────────────────────── */}
+        {!settings ? (
+          <Card>
+            <StateBlock state="loading" title="Reading server.properties…" compact />
+          </Card>
+        ) : !settings.present ? (
+          <Card title="Game rules" icon="sliders">
+            <StateBlock
+              state="empty"
+              icon="file"
+              title="No settings file yet"
+              message={
+                <>
+                  Minecraft writes <code>server.properties</code> the first time
+                  it boots. Start the server once and every rule shows up here.
+                </>
+              }
+              compact
+            />
+          </Card>
+        ) : (
+          <Card
+            title="Game rules"
+            icon="sliders"
+            description={
+              view === "common"
+                ? "The settings most people actually change."
+                : view === "advanced"
+                  ? "Performance and behaviour knobs. Safe to leave alone."
+                  : "Every key in the file, unvalidated. Here be dragons."
+            }
+            right={
+              <Segmented
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "common" as View, label: "Basics" },
+                  { value: "advanced" as View, label: "Advanced" },
+                  ...(expert
+                    ? [{ value: "raw" as View, label: "Raw", icon: "terminal" }]
+                    : []),
+                ]}
+              />
+            }
+            pad={false}
+          >
+            {view === "raw" ? (
+              <div className="p-3.5">
+                <Banner tone="warn" className="mb-3">
+                  Nothing here is checked before it's written. A typo can stop
+                  the server from booting.
+                </Banner>
+                <TextInput
+                  icon="search"
+                  value={rawFilter}
+                  placeholder="Filter keys…"
+                  onChange={(e) => setRawFilter(e.target.value)}
+                  className="mb-2"
+                />
+                <div className="space-y-1">
+                  {rawRows.map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <span
+                        className={cx(
+                          "w-60 shrink-0 truncate font-mono text-2xs",
+                          k in draft ? "text-accent-soft" : "text-ink-faint",
+                        )}
+                        title={k}
+                      >
+                        {k}
+                      </span>
+                      <TextInput
+                        mono
+                        value={val(k, v)}
+                        onChange={(e) => edit(k, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                  {rawRows.length === 0 && (
+                    <p className="py-6 text-center text-2xs text-ink-faint">
+                      No keys match “{rawFilter}”.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : fields.length === 0 ? (
+              <StateBlock
+                state="empty"
+                title="Nothing in this tier"
+                message="Try the other tab."
+                compact
+              />
+            ) : (
+              <div className="divide-y divide-line-soft">
+                {fields.map((f) => (
+                  <FieldRow
+                    key={f.key}
+                    field={f}
+                    value={val(f.key, f.value)}
+                    dirty={f.key in draft}
+                    onChange={edit}
+                  />
+                ))}
+              </div>
+            )}
 
-      <div className="border-t border-edge pt-3">
-        {!confirmRemove ? (
+            {!expert && view === "advanced" && (
+              <div className="border-t border-line-soft px-3.5 py-2.5 text-2xs text-ink-faint">
+                <Icon name="info" size={11} className="mr-1 inline" />
+                Want to edit the raw file? Turn on{" "}
+                <strong className="text-ink-dim">expert mode</strong> in
+                CraftPanel settings.
+              </div>
+            )}
+          </Card>
+        )}
+
+        {error && (
+          <Banner tone="bad" onDismiss={() => setError(null)}>
+            <span className="break-words">{error}</span>
+          </Banner>
+        )}
+
+        {/* ── where it lives ────────────────────────────────────────── */}
+        <Card title="On disk" icon="folder" pad={false}>
+          <dl className="divide-y divide-line-soft text-2xs">
+            {[
+              ["Folder", server.path],
+              ["Launches", server.launch_target],
+            ].map(([k, v]) => (
+              <div key={k} className="flex gap-3 px-3.5 py-2.5">
+                <dt className="w-16 shrink-0 text-ink-faint">{k}</dt>
+                <dd
+                  data-selectable
+                  className="min-w-0 flex-1 break-all font-mono text-ink-dim"
+                >
+                  {v}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+
+        {/* ── danger zone ───────────────────────────────────────────── */}
+        <Card
+          title="Remove this server"
+          icon="trash"
+          tone="bad"
+          description="Takes it out of CraftPanel's list. Your world and files stay exactly where they are on disk."
+        >
           <Button
             variant="danger"
+            icon="trash"
             onClick={() => setConfirmRemove(true)}
             disabled={locked}
             title={locked ? "Stop the server first" : undefined}
           >
             Remove from CraftPanel
           </Button>
-        ) : (
-          <div className="space-y-2 text-xs text-ink-dim">
-            <p>Remove “{server.name}”? The folder on disk is untouched.</p>
-            <div className="flex gap-2">
+        </Card>
+      </div>
+
+      {/* ── floating save bar ─────────────────────────────────────────
+          Anchored rather than inline, so you can edit a rule at the bottom of
+          Advanced and still see the button that saves it. */}
+      {dirty && (
+        <div className="cp-toast pointer-events-none sticky bottom-0 left-0 right-0 z-20 flex justify-center pb-1">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line bg-surface-3 py-1.5 pl-4 pr-1.5 shadow-e3">
+            <span className="text-xs text-ink-dim">
+              <strong className="tabular-nums text-ink">
+                {Object.keys(draft).length}
+              </strong>{" "}
+              unsaved change{Object.keys(draft).length > 1 ? "s" : ""}
+            </span>
+            <Button
+              variant="quiet"
+              size="sm"
+              onClick={() => setDraft({})}
+              disabled={busy}
+            >
+              Discard
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="save"
+              onClick={save}
+              loading={busy}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {confirmRemove && (
+        <Modal
+          title={`Remove “${server.name}”?`}
+          icon="trash"
+          size="sm"
+          onClose={() => setConfirmRemove(false)}
+          footer={
+            <>
               <Button
-                variant="danger"
-                onClick={async () => {
-                  await api.removeServer(server.id);
-                  onServersChanged();
-                }}
+                variant="quiet"
+                onClick={() => setConfirmRemove(false)}
+                className="mr-auto"
               >
-                Confirm
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirmRemove(false)}>
                 Cancel
               </Button>
-            </div>
+              <Button
+                variant="danger"
+                icon="trash"
+                onClick={async () => {
+                  await api.removeServer(server.id);
+                  setConfirmRemove(false);
+                  onServersChanged();
+                  toast.show(`Removed ${server.name}`, "The folder is untouched.");
+                }}
+              >
+                Remove it
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm leading-relaxed text-ink-dim">
+            This only removes it from CraftPanel's sidebar.
+          </p>
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-line-soft bg-surface-2 p-3 text-xs">
+            <Icon name="folder" size={14} className="mt-0.5 shrink-0 text-ok" />
+            <span className="text-ink-dim">
+              Your world, mods and backups stay at{" "}
+              <span data-selectable className="break-all font-mono text-ink">
+                {server.path}
+              </span>
+              . You can add it back any time.
+            </span>
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function FieldRow({
-  field,
-  value,
-  onChange,
-}: {
-  field: SettingField;
-  value: string;
-  onChange: (key: string, v: string) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3">
-        <label className="text-sm text-ink">{field.label}</label>
-        {field.kind === "bool" ? (
-          <input
-            type="checkbox"
-            checked={value === "true"}
-            onChange={(e) => onChange(field.key, e.target.checked ? "true" : "false")}
-            className="accent-accent"
-          />
-        ) : field.kind === "enum" ? (
-          <select
-            value={value}
-            onChange={(e) => onChange(field.key, e.target.value)}
-            className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
-          >
-            {field.options.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type={field.kind === "int" ? "number" : "text"}
-            value={value}
-            onChange={(e) => onChange(field.key, e.target.value)}
-            className="w-52 rounded-md border border-edge bg-panel-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
-          />
-        )}
-      </div>
-      {field.help && (
-        <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">{field.help}</div>
+        </Modal>
       )}
-      {field.note && <div className="mt-0.5 text-[11px] text-warn">{field.note}</div>}
     </div>
   );
 }

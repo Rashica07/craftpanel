@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { JvmInfo } from "../types";
-import { Button } from "./ui";
+import { Button, Card } from "./ui";
 
 export function JvmSection({
   serverId,
@@ -53,11 +53,12 @@ export function JvmSection({
   const dirty = draft.trim() !== (info.args ?? "").trim();
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
-        JVM flags
-      </div>
-      <p className="mb-2 text-[11px] leading-snug text-ink-faint">
+    <Card
+      title="Java flags"
+      icon="terminal"
+      description="For tuners only — the defaults are already good."
+    >
+      <p className="mb-2 text-2xs leading-snug text-ink-faint">
         Extra flags added between the memory flags and <code>-jar</code>. Leave blank
         for defaults. Heap size comes from the RAM slider above.
       </p>
@@ -67,7 +68,7 @@ export function JvmSection({
         rows={3}
         spellCheck={false}
         placeholder="-XX:+UseG1GC …"
-        className="w-full resize-none rounded border border-edge bg-panel-2 p-2 font-mono text-[11px] text-ink outline-none focus:border-accent"
+        className="w-full resize-none rounded border border-line bg-surface-2 p-2 font-mono text-2xs text-ink outline-none focus:border-accent"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button variant="primary" disabled={busy || !dirty} onClick={() => save(draft)}>
@@ -95,7 +96,7 @@ export function JvmSection({
           </Button>
         )}
         <button
-          className="text-[11px] text-accent hover:underline"
+          className="text-2xs text-accent hover:underline"
           onClick={() => setShowLine((v) => !v)}
         >
           {showLine ? "hide" : "show"} launch command
@@ -106,12 +107,12 @@ export function JvmSection({
           {info.resolved}
         </pre>
       )}
-      {note && <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{note}</div>}
+      {note && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{note}</div>}
       {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
           {error}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

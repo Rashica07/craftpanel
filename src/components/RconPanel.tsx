@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PlayerAction, PlayerList, RconSettings } from "../types";
-import { Badge, Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  Select,
+  StateBlock,
+  Tooltip,
+  cx,
+  toast,
+} from "./ui";
+import { Icon } from "./Icon";
 
 export function RconPanel({
   serverId,
@@ -66,6 +77,7 @@ export function RconPanel({
         `Wrote ${r.changed.join(", ")} to server.properties.` +
           (r.restartRequired ? "" : " RCON is ready on next start."),
       );
+      toast.ok("Remote console enabled", r.changed.join(", "));
       if (r.restartRequired) onNeedsRestart?.();
       loadSettings();
     } catch (e) {
@@ -106,124 +118,247 @@ export function RconPanel({
     }
   }
 
-  return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-ink-faint">
-          Players &amp; RCON
-        </span>
-        {settings && (
-          <Badge tone={settings.enabled ? "ok" : "neutral"}>
-            {settings.enabled ? `RCON :${settings.port}` : "RCON off"}
-          </Badge>
-        )}
-      </div>
+  const online = list?.players ?? [];
 
+  return (
+    <Card
+      title="Who's online"
+      icon="users"
+      description="Live player list and moderation, over RCON."
+      right={
+        settings && (
+          <Tooltip
+            label={
+              settings.enabled
+                ? `CraftPanel talks to the server on port ${settings.port}`
+                : "Remote console is off — CraftPanel can't see players or run commands"
+            }
+          >
+            <Badge tone={settings.enabled ? "ok" : "neutral"} dot>
+              {settings.enabled ? `Connected · ${settings.port}` : "Not connected"}
+            </Badge>
+          </Tooltip>
+        )
+      }
+      pad={false}
+    >
       {!settings ? (
-        <div className="text-xs text-ink-faint">Checking…</div>
+        <StateBlock state="loading" title="Checking the connection…" compact />
       ) : !settings.propertiesPresent ? (
-        <div className="text-xs text-ink-faint">
-          Start the server once so it writes <code>server.properties</code>, then
-          you can enable RCON here.
-        </div>
+        <StateBlock
+          state="empty"
+          icon="file"
+          title="Nothing to connect to yet"
+          message={
+            <>
+              Start the server once so it writes <code>server.properties</code>,
+              then CraftPanel can hook into it.
+            </>
+          }
+          compact
+        />
       ) : !settings.enabled ? (
-        <div className="space-y-2">
-          <p className="text-xs text-ink-dim">
-            RCON lets CraftPanel read the player list and run commands. Enabling it
-            writes only <code>enable-rcon</code>, <code>rcon.port</code>,{" "}
-            <code>rcon.password</code> and <code>broadcast-rcon-to-ops</code> —
-            nothing else is touched.
-          </p>
-          <Button variant="primary" onClick={enableRcon} disabled={busy}>
-            {busy ? "Writing…" : "Enable RCON"}
-          </Button>
+        <div className="p-3.5">
+          <div className="flex items-start gap-3 rounded-lg border border-line-soft bg-surface-2 p-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-muted text-accent">
+              <Icon name="key" size={15} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h4 className="text-sm font-medium text-ink">
+                Turn on the remote console
+              </h4>
+              <p className="mt-1 text-2xs leading-relaxed text-ink-faint">
+                This is how CraftPanel sees who's playing and runs commands for
+                you. It writes exactly four lines —{" "}
+                <code>enable-rcon</code>, <code>rcon.port</code>,{" "}
+                <code>rcon.password</code> and <code>broadcast-rcon-to-ops</code>{" "}
+                — and touches nothing else in your config.
+              </p>
+              <Button
+                variant="primary"
+                icon="key"
+                className="mt-2.5"
+                onClick={enableRcon}
+                loading={busy}
+              >
+                Turn it on
+              </Button>
+            </div>
+          </div>
         </div>
       ) : !reachable ? (
-        <div className="text-xs text-ink-faint">
-          RCON is configured on port {settings.port}. Start the server to see who's
-          online.
-        </div>
+        <StateBlock
+          state="offline"
+          title="Server isn't running"
+          message={`Everything's set up on port ${settings.port} — start the server to see who's online.`}
+          compact
+        />
       ) : (
-        <div className="space-y-2">
-          <div className="text-xs text-ink-dim">
-            {list ? `${list.online} / ${list.max} online` : "Connecting to RCON…"}
+        <>
+          <div className="flex items-center gap-2 border-b border-line-soft px-3.5 py-2">
+            <span className="text-xs text-ink-dim">
+              {list ? (
+                <>
+                  <strong className="tabular-nums text-ink">{list.online}</strong>{" "}
+                  of {list.max} slots used
+                </>
+              ) : (
+                "Connecting…"
+              )}
+            </span>
           </div>
-          <ul className="space-y-1">
-            {list?.players.map((p) => (
-              <li key={p} className="rounded-md bg-panel-2">
-                <button
-                  onClick={() => setSelected(selected === p ? null : p)}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm hover:bg-panel-3"
-                >
-                  <span>{p}</span>
-                  <span className="text-xs text-ink-faint">manage</span>
-                </button>
-                {selected === p && (
-                  <div className="flex flex-wrap gap-1 border-t border-edge p-2">
-                    <Button variant="subtle" onClick={() => act("kick", p)} disabled={busy}>
-                      Kick
-                    </Button>
-                    <Button variant="danger" onClick={() => act("ban", p)} disabled={busy}>
-                      Ban
-                    </Button>
-                    <Button variant="subtle" onClick={() => act("op", p)} disabled={busy}>
-                      Op
-                    </Button>
-                    <Button variant="subtle" onClick={() => act("deop", p)} disabled={busy}>
-                      De-op
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      onClick={() => act("whitelist-add", p)}
-                      disabled={busy}
-                    >
-                      Whitelist +
-                    </Button>
-                    <select
-                      onChange={(e) => e.target.value && act("gamemode", p, e.target.value)}
-                      defaultValue=""
-                      disabled={busy}
-                      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-ink"
-                    >
-                      <option value="" disabled>
-                        gamemode…
-                      </option>
-                      <option value="survival">survival</option>
-                      <option value="creative">creative</option>
-                      <option value="adventure">adventure</option>
-                      <option value="spectator">spectator</option>
-                    </select>
-                  </div>
-                )}
-              </li>
-            ))}
-            {list && list.players.length === 0 && (
-              <li className="px-2 py-1 text-xs text-ink-faint">Nobody online.</li>
-            )}
-          </ul>
 
-          <div className="flex items-center gap-2 border-t border-edge pt-2">
-            <span className="font-mono text-xs text-ink-faint">/</span>
+          {online.length === 0 ? (
+            <StateBlock
+              state="empty"
+              icon="users"
+              title="Nobody's on right now"
+              message="Send someone the join address from the Network tab."
+              compact
+            />
+          ) : (
+            <ul className="divide-y divide-line-soft">
+              {online.map((p) => (
+                <li key={p}>
+                  <button
+                    onClick={() => setSelected(selected === p ? null : p)}
+                    aria-expanded={selected === p}
+                    className={cx(
+                      "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors",
+                      selected === p ? "bg-surface-2" : "hover:bg-surface-2",
+                    )}
+                  >
+                    {/* a stable per-name colour, so faces are recognisable */}
+                    <span
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-md font-mono text-2xs font-bold text-ink"
+                      style={{
+                        background: `hsl(${
+                          [...p].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
+                        } 32% 26%)`,
+                      }}
+                    >
+                      {p.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                      {p}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-2xs text-ink-faint">
+                      Manage
+                      <Icon
+                        name={selected === p ? "chevron-up" : "chevron-down"}
+                        size={12}
+                      />
+                    </span>
+                  </button>
+
+                  {selected === p && (
+                    <div className="cp-in flex flex-wrap items-center gap-1.5 bg-surface-2 px-3.5 pb-3">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="arrow-right"
+                        onClick={() => act("kick", p)}
+                        disabled={busy}
+                      >
+                        Kick
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="crown"
+                        onClick={() => act("op", p)}
+                        disabled={busy}
+                      >
+                        Make operator
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => act("deop", p)}
+                        disabled={busy}
+                      >
+                        Remove operator
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="list"
+                        onClick={() => act("whitelist-add", p)}
+                        disabled={busy}
+                      >
+                        Add to whitelist
+                      </Button>
+                      <Select
+                        onChange={(e) =>
+                          e.target.value && act("gamemode", p, e.target.value)
+                        }
+                        defaultValue=""
+                        disabled={busy}
+                        className="w-36"
+                      >
+                        <option value="" disabled>
+                          Change mode…
+                        </option>
+                        <option value="survival">Survival</option>
+                        <option value="creative">Creative</option>
+                        <option value="adventure">Adventure</option>
+                        <option value="spectator">Spectator</option>
+                      </Select>
+                      <span className="flex-1" />
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        icon="ban"
+                        onClick={() => act("ban", p)}
+                        disabled={busy}
+                      >
+                        Ban
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex items-center gap-2 border-t border-line-soft bg-surface-2 px-3.5 py-2">
+            <span className="select-none font-mono text-xs text-accent">/</span>
             <input
               value={cmd}
               onChange={(e) => setCmd(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendCmd()}
-              placeholder="RCON command"
-              className="flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-faint"
+              placeholder="Run a command — e.g. time set day"
+              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-ghost"
             />
-            <Button variant="subtle" onClick={sendCmd} disabled={busy || !cmd.trim()}>
+            <Button
+              variant={cmd.trim() ? "primary" : "subtle"}
+              size="sm"
+              onClick={sendCmd}
+              disabled={busy || !cmd.trim()}
+            >
               Run
             </Button>
           </div>
-        </div>
+        </>
       )}
 
-      {note && <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{note}</div>}
-      {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
-          {error}
+      {note && (
+        <div className="border-t border-line-soft px-3.5 py-2">
+          <p
+            data-selectable
+            className="whitespace-pre-wrap break-words font-mono text-2xs text-ink-dim"
+          >
+            {note}
+          </p>
         </div>
       )}
-    </div>
+      {error && (
+        <div className="p-3.5 pt-0">
+          <Banner tone="bad" onDismiss={() => setError(null)}>
+            {error}
+          </Banner>
+        </div>
+      )}
+    </Card>
   );
 }

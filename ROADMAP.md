@@ -512,3 +512,76 @@ Minecraft now ships a **JSON-RPC-over-WebSocket** management API:
 - Dark theme, orange `#FF8C00`.
 - Prefer the **native management protocol** over RCON wherever the server
   supports it; RCON stays the compatibility path.
+
+## Batch 12 — full visual + UX redesign (2026-08-30)
+
+The UI read like a dev tool: flat, low-contrast, every panel the same weight,
+no onboarding, unclear next action. This batch rebuilds the presentation layer
+without touching business logic — every Tauri command, event and type is
+unchanged.
+
+**Token system** (`src/index.css`)
+- Raw values on `:root` as `--cp-*`; Tailwind maps them with `@theme inline`,
+  so themes swap at runtime with no rebuild.
+- Full ramp: bg + 4 surfaces + console well, 3 line levels, 4 ink levels,
+  accent (hover/press/soft/muted/line/ring/on-accent), 4 semantic statuses each
+  with a `-soft` (text) and `-muted` (fill) pair.
+- Radius scale (6), shadow scale (3 + inset + glow), 8-step type scale,
+  motion tokens (120/160/220 ms, one ease).
+- Old token names (`panel`, `panel-2`, `edge`, …) are kept as aliases so no
+  feature panel broke during the migration.
+- **Light theme is already written** as a `:root[data-theme="light"]` block —
+  wiring a switch is the only work left.
+- Contrast is measured, not guessed: every ink level clears WCAG AA on every
+  surface it can appear on (`ink-faint` was lightened to `#908d98`,
+  `ink-ghost` to `#6f6c79` and demoted to placeholders/disabled only).
+
+**Platform skinning — one codebase, two native feels**
+- `main.tsx` stamps `<html data-os="mac|win|other">` before first paint.
+- `:root[data-os="win"]` overrides radii (tighter), shadows (crisper), border
+  strength, control height, the font stack (Segoe UI Variable / Cascadia Mono)
+  and the focus ring (Fluent-style light ring). macOS keeps softer corners,
+  system-ui/SF and diffuse shadows.
+- Rejected a native rewrite (SwiftUI + WinUI, or swift-cross-ui): it turns the
+  Rust core into a hand-written C-ABI surface for ~100 commands plus the
+  streaming events, and rebuilds the tauri-action release pipeline — for an app
+  that is mostly log streams, a Modrinth browser and a file editor, i.e. the
+  places a webview is the stronger renderer.
+
+**Bundled display face**
+- Space Grotesk (SIL OFL 1.1), latin subset, 22 KB woff2 at
+  `public/fonts/space-grotesk-latin.woff2`. Headings + logo only; body stays
+  system-ui. No network at runtime.
+
+**`ui.tsx` rebuilt** — Button (6 variants x 3 sizes, loading, icon slots),
+IconButton, Badge, Pill, StatusDot, Card, SectionHeader, Field, SettingRow,
+TextInput, Textarea, Select, Slider, Toggle, Checkbox, Tabs (with overflow
+menu + arrow-key roving focus), Segmented, Modal (portal, focus trap, Esc),
+Banner, EmptyState, StateBlock (loading/empty/error/offline), Skeleton,
+Spinner, ProgressBar, Tooltip (portal-positioned), CopyField, Kbd,
+Toaster + a module-level `toast()`.
+
+**Screens**
+- Shell: sidebar with rich status rows (dot + state + type + version + live
+  player count), split "New server" CTA, settings footer, ⌘/Ctrl+N.
+- First run: welcome hero with a 1-2-3 and one big CTA.
+- Server detail: top bar with a large status chip + uptime, Start/Stop, and an
+  overflow menu for restart/kill; banners for EULA, crash (with the suspect
+  mod named), external-port, restart-required, sync.
+- Console: parsed log lines (dim timestamp, coloured level, left rail for
+  warn/error), filter, error count, jump-to-latest, command history.
+- Health strip: area sparklines with gradient fill and a "now" dot.
+- Network: hero join address + QR, a three-rung "who can reach this" ladder
+  with per-rung fixes, tunnel/UPnP/Bedrock cards, advanced behind a disclosure.
+- Settings: Basics/Advanced/Raw tiers, every key an icon + label + one-line
+  help + control, floating save bar, in-app remove confirmation.
+- Create wizard: loader cards with marks, searchable version list, friendly
+  world & rules step with a live multiplayer-list MOTD preview, confirmation.
+
+**Bugs found and fixed on the way**
+- `window.prompt()` is a no-op in Tauri's WKWebView, so **rename in Worlds and
+  Files silently did nothing on macOS**. Both now use in-app dialogs, as does
+  new-folder; `confirm()` deletes became real modals.
+- The create wizard had no way back out of a failed provision — added.
+- Favicon was a 276 KB PNG wordmark; now a 0.5 KB SVG mark. `index.html` also
+  paints the window background before React mounts, killing the launch flash.

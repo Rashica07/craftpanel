@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { ModrinthInstalled, ModrinthSearch, ServerType } from "../types";
-import { Badge, Button } from "./ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  IconButton,
+  Segmented,
+  StateBlock,
+  TextInput,
+  Tooltip,
+  cx,
+} from "./ui";
 import { Icon } from "./Icon";
 
 function num(n: number) {
@@ -105,137 +116,218 @@ export function BrowsePanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex gap-1.5">
-        <div className="flex rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setPtype(t.id)}
-              className={`rounded px-2 py-1 ${
-                ptype === t.id ? "bg-accent text-black" : "text-ink-dim hover:text-ink"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2">
-          <Icon name="search" size={13} className="text-ink-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && doSearch()}
-            placeholder="Search Modrinth…"
-            className="flex-1 bg-transparent py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint"
-          />
-        </div>
+      {/* ── search bar ───────────────────────────────────────────── */}
+      <div className="mb-3 flex gap-2">
+        <Segmented
+          value={ptype}
+          onChange={setPtype}
+          options={tabs.map((t) => ({ value: t.id, label: t.label }))}
+        />
+        <TextInput
+          icon="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && doSearch()}
+          placeholder="Search Modrinth — try “worldedit” or “shopkeepers”…"
+        />
+        <Button variant="secondary" icon="search" onClick={doSearch}>
+          Search
+        </Button>
       </div>
 
-      {note && <div className="mb-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{note}</div>}
+      {note && (
+        <Banner tone="ok" className="mb-2" onDismiss={() => setNote(null)}>
+          {note}
+        </Banner>
+      )}
       {error && (
-        <div className="mb-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <Banner tone="bad" className="mb-2" onDismiss={() => setError(null)}>
           {error}
-        </div>
+        </Banner>
       )}
 
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
-        {res?.hits.map((h) => (
-          <div key={h.projectId} className="flex gap-2 rounded-md border border-edge bg-panel-2 p-2">
-            {h.iconUrl ? (
-              <img src={h.iconUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
-            ) : (
-              <div className="h-10 w-10 shrink-0 rounded bg-panel-3" />
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className={`truncate text-sm font-medium ${!h.compatible ? "text-ink-faint" : ""}`}>
-                  {h.title}
-                </span>
-                <span className="text-[10px] text-ink-faint">↓ {num(h.downloads)}</span>
-                {!h.compatible && <Badge tone="warn">no build for your version</Badge>}
-                {h.serverSide === "optional" && h.compatible && (
-                  <span className="text-[10px] text-ink-faint">client-optional</span>
-                )}
-              </div>
-              <p className="line-clamp-2 text-[11px] leading-snug text-ink-faint">{h.description}</p>
-            </div>
-            <div className="shrink-0 self-center">
-              {h.installed ? (
-                <Badge tone="ok">installed</Badge>
-              ) : h.compatible ? (
-                <Button
-                  variant="subtle"
-                  disabled={!!busy}
-                  onClick={() => install(h.projectId, h.title)}
-                >
-                  {busy === h.projectId ? "…" : "Install"}
-                </Button>
-              ) : (
-                <span className="text-[10px] text-ink-faint">—</span>
-              )}
-            </div>
-          </div>
-        ))}
-        {res && res.hits.length === 0 && (
-          <div className="px-2 py-4 text-xs text-ink-faint">Nothing found.</div>
-        )}
-        {!res && <div className="px-2 py-4 text-xs text-ink-faint">Search to browse.</div>}
-      </div>
-
-      {installed.length > 0 && (
-        <div className="mt-2 border-t border-edge pt-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-ink-faint">
-              Installed via CraftPanel ({installed.length})
-              {updates.length > 0 && (
-                <span className="ml-1 text-warn">· {updates.length} update{updates.length > 1 ? "s" : ""}</span>
-              )}
-            </span>
-            <Button
-              variant="ghost"
-              disabled={!!busy}
-              onClick={() =>
-                act(() => api.modrinthCheckUpdates(serverId), "Checked for updates.", "chk")
-              }
-            >
-              {busy === "chk" ? "Checking…" : "Check updates"}
-            </Button>
-          </div>
-          <ul className="max-h-40 space-y-1 overflow-y-auto">
-            {installed.map((i) => (
+      {/* ── results ──────────────────────────────────────────────── */}
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line-soft bg-surface shadow-e1">
+        {!res || (!query.trim() && res.hits.length === 0) ? (
+          <StateBlock
+            state="empty"
+            icon="search"
+            title="Find mods and plugins"
+            message="Everything here comes from Modrinth, and CraftPanel picks the build that matches your Minecraft version — dependencies included."
+          />
+        ) : res.hits.length === 0 ? (
+          <StateBlock
+            state="empty"
+            icon="search"
+            title={`Nothing called “${query}”`}
+            message="Try a shorter search, or switch between mods and plugins above."
+            compact
+          />
+        ) : (
+          <ul className="divide-y divide-line-soft">
+            {res.hits.map((h) => (
               <li
-                key={i.projectId}
-                className="flex items-center gap-2 rounded bg-panel-2 px-2 py-1 text-xs"
-              >
-                <span className="flex-1 truncate">
-                  {i.title}
-                  {i.dependency && <span className="ml-1 text-ink-faint">(dependency)</span>}
-                  <span className="ml-1 font-mono text-[10px] text-ink-faint">{i.versionNumber}</span>
-                </span>
-                {i.update && (
-                  <Button
-                    variant="subtle"
-                    disabled={!!busy}
-                    onClick={() =>
-                      act(() => api.modrinthUpdate(serverId, i.projectId), `Updated ${i.title}.`, i.projectId)
-                    }
-                  >
-                    Update
-                  </Button>
+                key={h.projectId}
+                className={cx(
+                  "flex gap-3 px-3.5 py-3 transition-colors hover:bg-surface-2",
+                  !h.compatible && "opacity-60",
                 )}
-                <button
-                  className="text-ink-faint hover:text-bad"
-                  disabled={!!busy}
-                  onClick={() =>
-                    act(() => api.modrinthRemove(serverId, i.projectId), `Removed ${i.title}.`, i.projectId)
-                  }
-                >
-                  ✕
-                </button>
+              >
+                {h.iconUrl ? (
+                  <img
+                    src={h.iconUrl}
+                    alt=""
+                    loading="lazy"
+                    className="h-11 w-11 shrink-0 rounded-lg border border-line-soft object-cover"
+                  />
+                ) : (
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line-soft bg-surface-2 text-ink-ghost">
+                    <Icon name="package" size={18} />
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-ink">
+                      {h.title}
+                    </span>
+                    <span className="flex items-center gap-0.5 text-2xs text-ink-faint">
+                      <Icon name="download" size={10} />
+                      {num(h.downloads)}
+                    </span>
+                    {!h.compatible && (
+                      <Tooltip label="Nobody has published a build of this for your Minecraft version yet.">
+                        <Badge tone="warn" size="sm" icon="alert">
+                          Not for {`this version`}
+                        </Badge>
+                      </Tooltip>
+                    )}
+                    {h.serverSide === "optional" && h.compatible && (
+                      <Tooltip label="Works on the server, but your friends get more out of it if they install it too.">
+                        <Badge tone="neutral" size="sm">
+                          Better with client
+                        </Badge>
+                      </Tooltip>
+                    )}
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-faint">
+                    {h.description}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center">
+                  {h.installed ? (
+                    <Badge tone="ok" icon="check">
+                      Installed
+                    </Badge>
+                  ) : h.compatible ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="download"
+                      disabled={!!busy}
+                      loading={busy === h.projectId}
+                      onClick={() => install(h.projectId, h.title)}
+                    >
+                      Install
+                    </Button>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>
-        </div>
+        )}
+      </div>
+
+      {/* ── what CraftPanel installed ────────────────────────────── */}
+      {installed.length > 0 && (
+        <Card
+          className="mt-3 shrink-0"
+          title="Installed from here"
+          icon="check-circle"
+          tone={updates.length ? "warn" : undefined}
+          right={
+            <>
+              {updates.length > 0 && (
+                <Badge tone="warn" dot>
+                  {updates.length} update{updates.length > 1 ? "s" : ""}
+                </Badge>
+              )}
+              <Button
+                variant="quiet"
+                size="sm"
+                icon="refresh"
+                disabled={!!busy}
+                loading={busy === "chk"}
+                onClick={() =>
+                  act(
+                    () => api.modrinthCheckUpdates(serverId),
+                    "Checked for updates.",
+                    "chk",
+                  )
+                }
+              >
+                Check for updates
+              </Button>
+            </>
+          }
+          pad={false}
+        >
+          <ul className="max-h-44 divide-y divide-line-soft overflow-y-auto">
+            {installed.map((i) => (
+              <li
+                key={i.projectId}
+                className="group flex items-center gap-2 px-3.5 py-2 transition-colors hover:bg-surface-2"
+              >
+                <span className="min-w-0 flex-1 truncate text-xs text-ink">
+                  {i.title}
+                  {i.dependency && (
+                    <Tooltip label="Installed automatically because something else needed it">
+                      <span className="ml-1.5 text-2xs text-ink-ghost">
+                        (needed by another mod)
+                      </span>
+                    </Tooltip>
+                  )}
+                </span>
+                <span className="shrink-0 font-mono text-2xs text-ink-faint">
+                  {i.versionNumber}
+                </span>
+                {i.update && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="arrow-up"
+                    disabled={!!busy}
+                    loading={busy === i.projectId}
+                    onClick={() =>
+                      act(
+                        () => api.modrinthUpdate(serverId, i.projectId),
+                        `Updated ${i.title}.`,
+                        i.projectId,
+                      )
+                    }
+                  >
+                    {i.update.versionNumber}
+                  </Button>
+                )}
+                <IconButton
+                  icon="trash"
+                  title={`Remove ${i.title}`}
+                  size="sm"
+                  disabled={!!busy}
+                  className="opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
+                  onClick={() =>
+                    act(
+                      () => api.modrinthRemove(serverId, i.projectId),
+                      `Removed ${i.title}.`,
+                      i.projectId,
+                    )
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
   );

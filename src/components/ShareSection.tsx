@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { CloudStatus, ServerRecord, ShareView } from "../types";
-import { Badge, Button } from "./ui";
+import { Badge, Button, Card } from "./ui";
 import { R2SetupModal } from "./R2SetupModal";
 
 export function leaseLabel(v: ShareView): { text: string; tone: "ok" | "warn" | "neutral" } {
@@ -80,29 +80,38 @@ export function ShareSection({
   }
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-ink-faint">
-          Share across devices
-        </span>
-        {isCloud && cloud && <Badge tone={cloudLeaseLabel(cloud).tone}>☁ {cloudLeaseLabel(cloud).text}</Badge>}
-        {!isCloud && folder?.shared && (
-          <Badge tone={leaseLabel(folder).tone}>⇄ {leaseLabel(folder).text}</Badge>
-        )}
-      </div>
+    <Card
+      title="Play the same world on two computers"
+      icon="cloud"
+      description="Hand the world back and forth with a friend, or between your own machines."
+      right={
+        <>
+          {isCloud && cloud && (
+            <Badge tone={cloudLeaseLabel(cloud).tone} icon="cloud">
+              {cloudLeaseLabel(cloud).text}
+            </Badge>
+          )}
+          {!isCloud && folder?.shared && (
+            <Badge tone={leaseLabel(folder).tone} icon="share">
+              {leaseLabel(folder).text}
+            </Badge>
+          )}
+        </>
+      }
+    >
 
       {isCloud ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-ink-faint">Code</span>
-            <code className="rounded bg-panel-2 px-2 py-1 font-mono text-sm tracking-widest text-ink">
+            <code className="rounded bg-surface-2 px-2 py-1 font-mono text-sm tracking-widest text-ink">
               {server.sync_code}
             </code>
             <Button variant="subtle" onClick={() => copy(server.sync_code!)}>
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
-          <p className="text-[11px] text-ink-faint">
+          <p className="text-2xs text-ink-faint">
             CraftPanel uploads the world to your R2 bucket on stop and pulls the
             latest on start. On the other device: <b>⇄ Join → Cloud</b> → enter
             this code.
@@ -158,9 +167,9 @@ export function ShareSection({
         </div>
       )}
 
-      {msg && <div className="mt-2 rounded bg-panel-2 px-2 py-1 text-xs text-ink-dim">{msg}</div>}
+      {msg && <div className="mt-2 rounded-md border border-line-soft bg-surface-2 px-2.5 py-1.5 text-xs text-ink-dim">{msg}</div>}
       {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
           {error}
         </div>
       )}
@@ -174,7 +183,7 @@ export function ShareSection({
           }}
         />
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -189,7 +198,7 @@ function FolderShared({ server, onDone }: { server: ServerRecord; onDone: () => 
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-xs text-ink-faint">Code</span>
-        <code className="rounded bg-panel-2 px-2 py-1 font-mono text-sm tracking-widest text-ink">
+        <code className="rounded bg-surface-2 px-2 py-1 font-mono text-sm tracking-widest text-ink">
           {view.code}
         </code>
         <Button
@@ -203,7 +212,7 @@ function FolderShared({ server, onDone }: { server: ServerRecord; onDone: () => 
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <p className="text-[11px] text-ink-faint">
+      <p className="text-2xs text-ink-faint">
         Synced-folder mode. Other device: <b>⇄ Join → Folder</b> → same folder +
         this code.
       </p>

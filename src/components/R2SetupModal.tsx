@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { Button, Field, TextInput } from "./ui";
+import { Button, Field, IconButton, TextInput, useDismissOnEscape } from "./ui";
 
 export function R2SetupModal({
   onClose,
@@ -35,17 +35,17 @@ export function R2SetupModal({
 
   const ready = accountId.trim() && bucket.trim() && accessKeyId.trim() && secretAccessKey.trim();
 
+
+  useDismissOnEscape(busy ? undefined : onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="w-full max-w-lg rounded-xl border border-edge bg-panel shadow-2xl">
-        <header className="flex items-center justify-between border-b border-edge px-5 py-3">
-          <h2 className="text-sm font-semibold">Cloud sync setup (Cloudflare R2)</h2>
-          <button onClick={onClose} className="text-ink-faint hover:text-ink">
-            ✕
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-[2px]">
+      <div role="dialog" aria-modal="true" className="cp-pop flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-e3">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-5 py-3.5">
+          <h2 className="font-display text-base font-semibold text-ink">Cloud sync setup (Cloudflare R2)</h2>
+          <IconButton icon="x" title="Close" size="sm" onClick={onClose} />
         </header>
 
-        <div className="space-y-3 px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           <p className="text-xs text-ink-dim">
             One-time setup. In the{" "}
             <a
@@ -78,19 +78,19 @@ export function R2SetupModal({
             />
           </Field>
 
-          <p className="text-[11px] text-ink-faint">
+          <p className="text-2xs text-ink-faint">
             Stored locally in CraftPanel's config folder. It never leaves your
             machine except to talk to R2.
           </p>
 
           {error && (
-            <div className="rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
+            <div className="rounded-md border border-bad/30 bg-bad-muted px-3 py-2 text-xs text-bad-soft">
               {error}
             </div>
           )}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-edge px-5 py-3">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-line-soft bg-surface-2/60 px-5 py-3">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

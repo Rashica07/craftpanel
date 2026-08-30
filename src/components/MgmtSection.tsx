@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { MgmtStatus } from "../types";
-import { Badge, Button } from "./ui";
+import { Badge, Button, Card } from "./ui";
 
 export function MgmtSection({
   serverId,
@@ -40,18 +40,21 @@ export function MgmtSection({
   }
 
   return (
-    <div className="rounded-lg border border-edge bg-panel p-3">
-      <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
-        Management API
-        {st.enabled ? (
-          <Badge tone={st.reachable ? "ok" : "neutral"}>
-            {st.reachable ? `live :${st.port}` : `on :${st.port}`}
+    <Card
+      title="Management API"
+      icon="zap"
+      description="Minecraft 1.21.9+ can be controlled live, without restarts."
+      right={
+        st.enabled ? (
+          <Badge tone={st.reachable ? "ok" : "neutral"} dot>
+            {st.reachable ? `Live · ${st.port}` : `On · ${st.port}`}
           </Badge>
         ) : (
-          <Badge tone="neutral">off</Badge>
-        )}
-      </div>
-      <p className="mb-2 text-[11px] leading-snug text-ink-faint">
+          <Badge tone="neutral">Off</Badge>
+        )
+      }
+    >
+      <p className="mb-2 text-2xs leading-snug text-ink-faint">
         Minecraft 1.21.9+ ships a management API (JSON-RPC over WebSocket) —
         changing settings and game rules without a restart, live events, real TPS.
         CraftPanel can turn it on now (localhost-only, auto-generated secret); full
@@ -69,10 +72,10 @@ export function MgmtSection({
         )}
       </div>
       {error && (
-        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+        <div className="mt-2 rounded-md border border-bad/30 bg-bad-muted px-2.5 py-1.5 text-xs text-bad-soft">
           {error}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
