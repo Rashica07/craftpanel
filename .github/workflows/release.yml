@@ -1,0 +1,56 @@
+name: Build installers
+
+# Builds macOS (.dmg) and Windows 10/11 (.exe + .msi) installers.
+# Trigger by pushing a tag like v0.1.0, or run manually from the Actions tab.
+#
+# CraftPanel isn't a git repo yet. To use this:
+#   1. Create a private GitHub repo.
+#   2. git init && git add -A && git commit -m "init" && git remote add origin <url> && git push
+#   3. git tag v0.1.0 && git push --tags   ->  installers appear under Releases.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "CraftPanel ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false

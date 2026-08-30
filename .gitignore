@@ -1,0 +1,15 @@
+# deps / build output
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# os / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# logs / scratch
+*.log
+npm-debug.log*

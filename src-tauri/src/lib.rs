@@ -1,0 +1,233 @@
+mod adapter;
+mod admin;
+mod analytics;
+mod backups;
+mod branding;
+mod cloud;
+mod commands;
+mod db;
+mod external;
+mod files;
+mod java;
+mod minecraft;
+mod mods;
+mod net;
+mod process;
+mod properties;
+mod provision;
+mod r2;
+mod rcon;
+mod session;
+mod settings;
+mod share;
+mod sync;
+mod system;
+mod worlds;
+
+use std::sync::Arc;
+
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, RunEvent, WindowEvent,
+};
+
+use cloud::CloudManager;
+use db::Db;
+use process::ProcessManager;
+
+/// Stable per-device id, exposed to commands.
+pub struct DeviceId(pub String);
+
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Server folders from the DB — for lease release + session cleanup on quit.
+fn server_dirs(app: &tauri::AppHandle) -> Vec<String> {
+    app.try_state::<Db>()
+        .and_then(|db| db.list_servers().ok())
+        .map(|servers| servers.into_iter().map(|s| s.path).collect())
+        .unwrap_or_default()
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let dir = app.path().app_config_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let db = Db::open(&dir.join("craftpanel.db"))
+                .map_err(|e| format!("failed to open database: {e}"))?;
+            let device_id = share::device_id(&dir);
+            let procs = ProcessManager::new(app.handle().clone(), device_id.clone());
+            let cloud = Arc::new(CloudManager::new(
+                app.handle().clone(),
+                &dir,
+                device_id.clone(),
+            ));
+            procs.set_lifecycle(cloud.clone());
+
+            // re-adopt servers this app launched before a restart / crash, so
+            // they show as "Running (reattached)" and not "external"
+            if let Ok(servers) = db.list_servers() {
+                procs.adopt_all(&servers);
+            }
+
+            app.manage(db);
+            app.manage(DeviceId(device_id));
+            app.manage(procs);
+            app.manage(cloud);
+
+            // --- tray icon: closing the window while a server runs hides here ---
+            let show_i = MenuItem::with_id(app, "show", "Show CraftPanel", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit CraftPanel", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let mut tray = TrayIconBuilder::with_id("main")
+                .tooltip("CraftPanel")
+                .menu(&menu);
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => show_main(app),
+                    "quit" => {
+                        if let Some(pm) = app.try_state::<ProcessManager>() {
+                            pm.shutdown_and_release(&server_dirs(app));
+                        }
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // standard native menu bar (App / Edit / View / Window / Help on macOS)
+            // — gives proper Cmd-C/V/Q/W/H and the About item
+            if let Ok(menu) = Menu::default(app.handle()) {
+                let _ = app.set_menu(menu);
+            }
+
+            if let Some(win) = app.get_webview_window("main") {
+                let win2 = win.clone();
+                win.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        let app = win2.app_handle();
+                        let running = app
+                            .try_state::<ProcessManager>()
+                            .map(|pm| pm.any_active())
+                            .unwrap_or(false);
+                        if running {
+                            // keep servers alive — hide to the tray instead
+                            api.prevent_close();
+                            let _ = win2.hide();
+                        }
+                    }
+                });
+            }
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::detect_server,
+            commands::detect_java,
+            commands::add_server,
+            commands::list_servers,
+            commands::remove_server,
+            commands::system_info,
+            commands::start_server,
+            commands::stop_server,
+            commands::stop_on_port,
+            commands::kill_server,
+            commands::send_console,
+            commands::accept_eula,
+            commands::console_lines,
+            commands::server_runtime,
+            commands::all_runtimes,
+            commands::set_server_ram,
+            commands::set_keep_awake,
+            commands::check_external,
+            commands::eula_state,
+            commands::rcon_settings,
+            commands::rcon_setup,
+            commands::rcon_players,
+            commands::rcon_command,
+            commands::rcon_player_action,
+            commands::loader_versions,
+            commands::create_server,
+            commands::get_settings,
+            commands::apply_settings,
+            commands::list_mods,
+            commands::set_mod_enabled,
+            commands::remove_mod,
+            commands::import_mods,
+            commands::backup_now,
+            commands::list_backups,
+            commands::delete_backup,
+            commands::restore_backup,
+            commands::get_backups_config,
+            commands::set_backups_keep,
+            commands::fs_list,
+            commands::fs_read,
+            commands::fs_write,
+            commands::fs_mkdir,
+            commands::fs_rename,
+            commands::fs_delete,
+            commands::fs_import,
+            commands::fs_export,
+            commands::tail_log,
+            commands::admin_lists,
+            commands::player_history,
+            commands::server_icon_status,
+            commands::set_server_icon,
+            commands::clear_server_icon,
+            commands::net_info,
+            commands::set_tunnel_address,
+            commands::upnp_forward,
+            commands::upnp_remove,
+            commands::qr_svg,
+            commands::list_worlds,
+            commands::world_set_active,
+            commands::world_create,
+            commands::world_rename,
+            commands::world_delete,
+            commands::share_server,
+            commands::unshare_server,
+            commands::join_shared,
+            commands::share_status,
+            commands::r2_config_get,
+            commands::r2_config_set,
+            commands::r2_config_clear,
+            commands::cloud_share,
+            commands::cloud_join,
+            commands::cloud_status,
+            commands::cloud_finish,
+            commands::cloud_unshare,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let RunEvent::ExitRequested { .. } = event {
+                if let Some(pm) = app.try_state::<ProcessManager>() {
+                    pm.shutdown_and_release(&server_dirs(app));
+                }
+            }
+        });
+}
