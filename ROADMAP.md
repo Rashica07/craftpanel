@@ -136,12 +136,13 @@ done, `·` = not started.
 - **RCON** ✓ — source-RCON client; one-click setup writes *only* the 4 rcon
   keys (never `online-mode`); live player list; kick/ban/pardon/op/deop/
   whitelist±/gamemode, all by **username**; free-form command box.
-- **Native Management Protocol** · — MC 1.21.9 / 26.x ship a JSON-RPC-over-
-  WebSocket API (`management-server-*`). Auto-detect it, prefer it over RCON:
-  update players / allowlist / ops / **settings / game rules without a
-  restart**, subscribe to live events (joins, gamerule changes), read
-  **TPS / MSPT**. 40-char bearer secret (auto-gen if blank), TLS default on.
-  RCON stays the fallback for older servers.
+- **Native Management Protocol** ~ (2026-08-30) — `mgmt.rs` detects MC 1.21.9+ /
+  26.x support, reads the `management-server-*` config, and **one-click enable**
+  (writes only those keys, generates a 40-char secret, localhost-only). The full
+  JSON-RPC-over-WebSocket **client** (no-restart settings, live events, real
+  TPS) is still TODO — needs a 1.21.9+ test server. RCON stays the path today
+  (now via a **kept-alive connection pool**, `RconPool` — no more reconnect
+  churn from the perf poll).
 - **Attach to an externally-running server** · — once RCON *or* the mgmt
   protocol is reachable, drive a server CraftPanel didn't spawn; tail
   `logs/latest.log` for its console.
@@ -256,14 +257,15 @@ per-player first seen / last seen / total playtime / join count / last IP,
 session history. Offline-mode aware — keyed on **name**. Skin heads via a
 Bedrock-safe avatar source. No new online connections required beyond avatars.
 
-#### 6.5 — Anti-cheat  ·
-- **Advisor** — know the common anti-cheats per loader (Paper: Grim / Vulcan /
-  NCP; Fabric: fewer, e.g. Vulcan/AntiCheatReloaded ports); if a server is
-  public (port reachable) and has none installed, flag it with a one-click
-  assisted install + a sane starter config.
-- **Signals** — lightweight live log/RCON watch (fly/speed/reach kick messages,
-  rapid re-joins) → a per-player "suspicion" list. Advisory only.
-- **Never touches `online-mode`** — offline auth stays the auth-mod's job.
+#### 6.5 — Anti-cheat  ✓ (2026-08-30)
+`anticheat.rs` — **Advisor**: catalogue per loader (Paper: Grim / Vulcan / NCP /
+Spartan; Fabric: Vulcan / Panda / NCP-port), detect what's in `mods/`+`plugins/`,
+**flag when the server is shared publicly (a tunnel address is set) and has
+none**, with Modrinth slugs for one-click install via the Browse tab.
+**Signals**: parse recent logs for movement kicks / flight / AC-plugin flag
+lines / rapid re-joins → per-player suspicion list with sample lines. Advisory
+only, never `online-mode`. `SecuritySection` in the Players tab.
+- **Later:** live RCON watch (not just log scrape); a starter-config writer.
 
 ### Phase 7 — Ship & run anywhere  ~
 
