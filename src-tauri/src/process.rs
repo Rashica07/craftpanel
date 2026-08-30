@@ -828,12 +828,33 @@ fn ensure_user_jvm_args(rec: &ServerRecord) {
             !t.starts_with("-Xmx") && !t.starts_with("-Xms")
         })
         .collect();
+    // drop any of our previously-written extra flags too, then re-add
+    let extra = jvm_arg_tokens(rec);
+    let kept: Vec<&str> = kept
+        .into_iter()
+        .filter(|l| !extra.iter().any(|e| e == l.trim()))
+        .collect();
     let mut out = kept.join("\n");
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
     out.push_str(&format!("-Xms{}M\n-Xmx{}M\n", rec.ram_mb, rec.ram_mb));
+    for t in &extra {
+        out.push_str(t);
+        out.push('\n');
+    }
     let _ = fs::write(path, out);
+}
+
+/// Extra JVM flags for this server (Aikar's / GC tuning), whitespace-split.
+pub(crate) fn jvm_arg_tokens(rec: &ServerRecord) -> Vec<String> {
+    rec.jvm_args
+        .as_deref()
+        .unwrap_or("")
+        .split_whitespace()
+        .filter(|t| t.starts_with('-'))
+        .map(|t| t.to_string())
+        .collect()
 }
 
 pub(crate) fn forge_args_file(dir: &Path) -> Option<String> {
@@ -884,6 +905,9 @@ pub(crate) fn build_command(rec: &ServerRecord) -> Result<Command, String> {
 
     cmd.arg(format!("-Xms{}M", rec.ram_mb));
     cmd.arg(format!("-Xmx{}M", rec.ram_mb));
+    for t in jvm_arg_tokens(rec) {
+        cmd.arg(t);
+    }
     cmd.arg("-jar").arg(&rec.launch_target).arg("nogui");
     Ok(cmd)
 }
@@ -895,6 +919,14 @@ fn describe_command(cmd: &Command) -> String {
         .map(|a| a.to_string_lossy().to_string())
         .collect();
     format!("{prog} {}", args.join(" "))
+}
+
+/// The exact `java …` line this server would launch with (for the UI).
+pub(crate) fn describe_launch(rec: &ServerRecord) -> String {
+    match build_command(rec) {
+        Ok(cmd) => describe_command(&cmd),
+        Err(e) => format!("(can't resolve: {e})"),
+    }
 }
 
 #[cfg(test)]
@@ -915,6 +947,7 @@ mod tests {
             created_at: 0,
             sync_code: None,
             keep_awake: false,
+            jvm_args: None,
         }
     }
 

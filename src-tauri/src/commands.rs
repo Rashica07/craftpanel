@@ -11,7 +11,9 @@ use crate::admin::{self, AdminLists};
 use crate::analytics::{self, PlayerStat};
 use crate::backups::{self, Backup};
 use crate::branding;
+use crate::crashreports::{self, CrashReport};
 use crate::db::{Db, NewServer, ServerRecord};
+use crate::perf::{self, PerfSample};
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
 use crate::schedule::{self, Schedule};
@@ -1021,6 +1023,100 @@ pub fn get_schedule(db: State<Db>, id: String) -> Result<Schedule, String> {
 pub fn set_schedule(db: State<Db>, id: String, schedule: Schedule) -> Result<(), String> {
     load(&db, &id)?;
     schedule::write(&db, &id, &schedule)
+}
+
+// --- Stage 7: performance, crashes, JVM args -------------------------------
+
+#[tauri::command]
+pub fn server_perf(
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+) -> Result<PerfSample, String> {
+    let rec = load(&db, &id)?;
+    let dir = std::path::Path::new(&rec.path);
+    let mut s = PerfSample::default();
+
+    let pid = procs.snapshot(&id).pid.or_else(|| {
+        external::port_pids(external::port_of(dir)).into_iter().next()
+    });
+    if let Some(pid) = pid {
+        let (ram, cpu) = perf::process_sample(pid);
+        s.ram_mb = ram;
+        s.cpu_pct = cpu;
+    }
+
+    if procs.is_running(&id) || external::probe(&rec.path).looks_running() {
+        if let Ok(mut c) = connect_rcon(&rec) {
+            let (tps, mspt, src) = perf::tps_over_rcon(&mut c);
+            s.tps = tps;
+            s.mspt = mspt;
+            s.source = src;
+        }
+    }
+    Ok(s)
+}
+
+#[tauri::command]
+pub fn latest_crash(db: State<Db>, id: String) -> Result<Option<CrashReport>, String> {
+    let rec = load(&db, &id)?;
+    Ok(crashreports::latest(&rec.path))
+}
+
+#[tauri::command]
+pub fn list_crashes(db: State<Db>, id: String) -> Result<Vec<CrashReport>, String> {
+    let rec = load(&db, &id)?;
+    Ok(crashreports::list(&rec.path))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JvmInfo {
+    pub args: Option<String>,
+    pub resolved: String,
+    pub aikar: String,
+}
+
+/// Aikar's flags (the heap flags come from the RAM slider, so they're omitted).
+fn aikar_flags(ram_mb: u32) -> String {
+    let big = ram_mb >= 12_288;
+    let (new_pct, max_new, region, reserve, ihop) = if big {
+        (40, 50, "16M", 15, 20)
+    } else {
+        (30, 40, "8M", 20, 15)
+    };
+    format!(
+        "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 \
+-XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch \
+-XX:G1NewSizePercent={new_pct} -XX:G1MaxNewSizePercent={max_new} -XX:G1HeapRegionSize={region} \
+-XX:G1ReservePercent={reserve} -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 \
+-XX:InitiatingHeapOccupancyPercent={ihop} -XX:G1MixedGCLiveThresholdPercent=90 \
+-XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem \
+-XX:MaxTenuringThreshold=1 -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true"
+    )
+}
+
+#[tauri::command]
+pub fn get_jvm_args(db: State<Db>, id: String) -> Result<JvmInfo, String> {
+    let rec = load(&db, &id)?;
+    Ok(JvmInfo {
+        args: rec.jvm_args.clone(),
+        resolved: crate::process::describe_launch(&rec),
+        aikar: aikar_flags(rec.ram_mb),
+    })
+}
+
+#[tauri::command]
+pub fn set_jvm_args(
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+    args: Option<String>,
+) -> Result<bool, String> {
+    load(&db, &id)?;
+    let v = args.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    db.set_jvm_args(&id, v.as_deref()).map_err(|e| e.to_string())?;
+    Ok(procs.is_running(&id))
 }
 
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------

@@ -7,12 +7,15 @@ import type {
   Backup,
   BackupsConfig,
   CloudStatus,
+  CrashReport,
   CreateSpec,
   DetectionResult,
   ExternalStatus,
   FileView,
   JavaInfo,
+  JvmInfo,
   Listing,
+  PerfSample,
   Loader,
   LogLine,
   ModList,
@@ -279,6 +282,23 @@ export const api = {
   },
   setSchedule(id: string, schedule: Schedule): Promise<void> {
     return invoke("set_schedule", { id, schedule });
+  },
+
+  // Stage 7 — performance / crashes / JVM
+  serverPerf(id: string): Promise<PerfSample> {
+    return invoke("server_perf", { id });
+  },
+  latestCrash(id: string): Promise<CrashReport | null> {
+    return invoke("latest_crash", { id });
+  },
+  listCrashes(id: string): Promise<CrashReport[]> {
+    return invoke("list_crashes", { id });
+  },
+  getJvmArgs(id: string): Promise<JvmInfo> {
+    return invoke("get_jvm_args", { id });
+  },
+  setJvmArgs(id: string, args: string | null): Promise<boolean> {
+    return invoke("set_jvm_args", { id, args });
   },
 
   // branding + worlds

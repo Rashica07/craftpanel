@@ -184,6 +184,29 @@ export interface Schedule {
   backupOnStop: boolean;
 }
 
+export interface PerfSample {
+  ramMb: number | null;
+  cpuPct: number | null;
+  tps: number | null;
+  mspt: number | null;
+  source: string | null;
+}
+
+export interface CrashReport {
+  file: string;
+  time: string | null;
+  mtime: number;
+  description: string | null;
+  headline: string | null;
+  suspect: string | null;
+}
+
+export interface JvmInfo {
+  args: string | null;
+  resolved: string;
+  aikar: string;
+}
+
 export interface TunnelStatus {
   running: boolean;
   address: string | null;

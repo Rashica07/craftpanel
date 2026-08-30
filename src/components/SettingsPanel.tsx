@@ -6,6 +6,7 @@ import { RamSlider } from "./RamSlider";
 import { ShareSection } from "./ShareSection";
 import { BrandingSection } from "./BrandingSection";
 import { AutomationSection } from "./AutomationSection";
+import { JvmSection } from "./JvmSection";
 
 type View = "common" | "advanced" | "raw";
 
@@ -116,6 +117,8 @@ export function SettingsPanel({
       <BrandingSection serverId={server.id} />
 
       <AutomationSection serverId={server.id} />
+
+      <JvmSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
 
       <ShareSection server={server} onServersChanged={onServersChanged} />
 

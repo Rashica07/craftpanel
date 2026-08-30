@@ -5,6 +5,7 @@ mod backups;
 mod branding;
 mod cloud;
 mod commands;
+mod crashreports;
 mod db;
 mod external;
 mod files;
@@ -12,6 +13,7 @@ mod java;
 mod minecraft;
 mod mods;
 mod net;
+mod perf;
 mod process;
 mod properties;
 mod provision;
@@ -220,6 +222,11 @@ pub fn run() {
             commands::qr_svg,
             commands::get_schedule,
             commands::set_schedule,
+            commands::server_perf,
+            commands::latest_crash,
+            commands::list_crashes,
+            commands::get_jvm_args,
+            commands::set_jvm_args,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,

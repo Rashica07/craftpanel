@@ -28,6 +28,9 @@ pub struct ServerRecord {
     /// Keep this machine awake (no idle sleep) while the server runs.
     #[serde(default)]
     pub keep_awake: bool,
+    /// Extra JVM flags injected between the heap flags and `-jar` (Aikar's, GC…).
+    #[serde(default)]
+    pub jvm_args: Option<String>,
 }
 
 /// Fields the UI supplies when confirming a new server.
@@ -70,6 +73,7 @@ impl Db {
             "ALTER TABLE servers ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        let _ = conn.execute("ALTER TABLE servers ADD COLUMN jvm_args TEXT", []);
         Ok(Db(Mutex::new(conn)))
     }
 
@@ -86,12 +90,13 @@ impl Db {
             created_at: now_secs(),
             sync_code: None,
             keep_awake: false,
+            jvm_args: None,
         };
         let conn = self.0.lock().unwrap();
         conn.execute(
             "INSERT INTO servers
-                (id, name, path, server_type, launch_target, mc_version, java_path, ram_mb, created_at, sync_code, keep_awake)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                (id, name, path, server_type, launch_target, mc_version, java_path, ram_mb, created_at, sync_code, keep_awake, jvm_args)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 rec.id,
                 rec.name,
@@ -104,6 +109,7 @@ impl Db {
                 rec.created_at,
                 rec.sync_code,
                 rec.keep_awake,
+                rec.jvm_args,
             ],
         )?;
         Ok(rec)
@@ -150,6 +156,15 @@ impl Db {
         Ok(())
     }
 
+    pub fn set_jvm_args(&self, id: &str, jvm_args: Option<&str>) -> rusqlite::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE servers SET jvm_args = ?2 WHERE id = ?1",
+            params![id, jvm_args],
+        )?;
+        Ok(())
+    }
+
     /// Generic key/value app setting (used for backup retention, scheduler
     /// config, …).
     pub fn get_setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
@@ -177,7 +192,7 @@ impl Db {
 }
 
 const COLS: &str =
-    "id, name, path, server_type, launch_target, mc_version, java_path, ram_mb, created_at, sync_code, keep_awake";
+    "id, name, path, server_type, launch_target, mc_version, java_path, ram_mb, created_at, sync_code, keep_awake, jvm_args";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRecord> {
     Ok(ServerRecord {
@@ -192,6 +207,7 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRecord> {
         created_at: r.get(8)?,
         sync_code: r.get(9)?,
         keep_awake: r.get::<_, i64>(10).unwrap_or(0) != 0,
+        jvm_args: r.get(11).ok().flatten(),
     })
 }
 

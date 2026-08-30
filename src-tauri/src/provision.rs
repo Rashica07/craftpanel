@@ -479,6 +479,7 @@ fn first_boot(
         created_at: 0,
         sync_code: None,
         keep_awake: false,
+        jvm_args: None,
     };
     let mut cmd = crate::process::build_command(&rec)?;
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -679,6 +680,7 @@ mod tests {
             created_at: 0,
             sync_code: None,
             keep_awake: false,
+            jvm_args: None,
         };
         let mut cmd = crate::process::build_command(&rec).unwrap();
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());

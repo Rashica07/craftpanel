@@ -4,6 +4,7 @@ import {
   SERVER_TYPE_META,
   STATUS_META,
   type CloudStatus,
+  type CrashReport,
   type ExternalStatus,
   type ProcSnapshot,
   type ServerRecord,
@@ -21,6 +22,7 @@ import { AdminPanel } from "./AdminPanel";
 import { WorldsPanel } from "./WorldsPanel";
 import { NetworkPanel } from "./NetworkPanel";
 import { PlayerHistory } from "./PlayerHistory";
+import { HealthStrip } from "./HealthStrip";
 import { Icon } from "./Icon";
 import { cloudLeaseLabel, leaseLabel } from "./ShareSection";
 
@@ -69,6 +71,7 @@ export function ServerDetail({
   const [share, setShare] = useState<ShareView | null>(null);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [crash, setCrash] = useState<CrashReport | null>(null);
 
   const status = runtime?.status ?? "stopped";
   const active = status === "running" || status === "starting" || status === "stopping";
@@ -131,6 +134,10 @@ export function ServerDetail({
     setShowEula(false);
     api.eulaState(server.id).then(setEulaOk).catch(() => setEulaOk(null));
   }, [server.id]);
+
+  useEffect(() => {
+    api.latestCrash(server.id).then(setCrash).catch(() => setCrash(null));
+  }, [server.id, status]);
 
   useEffect(() => {
     let alive = true;
@@ -356,8 +363,23 @@ export function ServerDetail({
       )}
       {status === "crashed" && !runtime?.needsEula && (
         <div className="mt-3 rounded-md border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">
-          Server crashed
-          {runtime?.exitCode != null ? ` (exit code ${runtime.exitCode})` : ""}. Check the console.
+          <div>
+            Server crashed
+            {runtime?.exitCode != null ? ` (exit code ${runtime.exitCode})` : ""}.
+          </div>
+          {crash && (
+            <div className="mt-1 space-y-0.5 text-[11px]">
+              {crash.headline && <div className="font-mono">{crash.headline}</div>}
+              {crash.suspect && (
+                <div>
+                  Likely culprit: <span className="font-mono text-warn">{crash.suspect}</span>
+                </div>
+              )}
+              <div className="text-ink-faint">
+                from {crash.file} — open the Files tab → <code>crash-reports/</code> for the full report
+              </div>
+            </div>
+          )}
         </div>
       )}
       {syncMsg && (
@@ -407,6 +429,7 @@ export function ServerDetail({
       <div className="mt-3 min-h-0 flex-1">
         {tab === "console" && (
           <div className="flex h-full flex-col">
+            <HealthStrip serverId={server.id} live={active || externalRunning} />
             <div className="mb-2 flex w-max rounded-md border border-edge bg-panel-2 p-0.5 text-xs">
               {(["live", "log"] as const).map((m) => (
                 <button
