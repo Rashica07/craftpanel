@@ -27,6 +27,7 @@ import type {
   R2Status,
   RconSettings,
   RconSetupResult,
+  Schedule,
   ServerRecord,
   ServerSettings,
   ShareInfo,
@@ -254,6 +255,14 @@ export const api = {
   },
   qrSvg(text: string): Promise<string> {
     return invoke("qr_svg", { text });
+  },
+
+  // Stage 6.2 — automation
+  getSchedule(id: string): Promise<Schedule> {
+    return invoke("get_schedule", { id });
+  },
+  setSchedule(id: string, schedule: Schedule): Promise<void> {
+    return invoke("set_schedule", { id, schedule });
   },
 
   // branding + worlds

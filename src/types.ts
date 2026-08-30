@@ -170,6 +170,20 @@ export interface PlayerStat {
   online: boolean;
 }
 
+export interface TimedCommand {
+  at: string;
+  command: string;
+}
+
+export interface Schedule {
+  restartOnCrash: boolean;
+  maxCrashRestarts: number;
+  dailyRestart: string | null;
+  restartWarningSecs: number;
+  timedCommands: TimedCommand[];
+  backupOnStop: boolean;
+}
+
 export interface JoinInfo {
   port: number;
   lanIp: string | null;

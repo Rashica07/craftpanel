@@ -1,0 +1,190 @@
+import { useCallback, useEffect, useState } from "react";
+import { api } from "../api";
+import type { Schedule } from "../types";
+import { Button } from "./ui";
+import { Icon } from "./Icon";
+
+const EMPTY: Schedule = {
+  restartOnCrash: false,
+  maxCrashRestarts: 3,
+  dailyRestart: null,
+  restartWarningSecs: 60,
+  timedCommands: [],
+  backupOnStop: false,
+};
+
+export function AutomationSection({ serverId }: { serverId: string }) {
+  const [sch, setSch] = useState<Schedule>(EMPTY);
+  const [saved, setSaved] = useState<Schedule>(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api
+      .getSchedule(serverId)
+      .then((s) => {
+        setSch(s);
+        setSaved(s);
+      })
+      .catch((e) => setError(String(e)));
+  }, [serverId]);
+
+  useEffect(() => {
+    setError(null);
+    setNote(null);
+    load();
+  }, [load]);
+
+  const dirty = JSON.stringify(sch) !== JSON.stringify(saved);
+  const set = <K extends keyof Schedule>(k: K, v: Schedule[K]) =>
+    setSch((s) => ({ ...s, [k]: v }));
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const clean: Schedule = {
+        ...sch,
+        dailyRestart: sch.dailyRestart?.trim() ? sch.dailyRestart.trim() : null,
+        timedCommands: sch.timedCommands.filter((c) => c.at.trim() && c.command.trim()),
+      };
+      await api.setSchedule(serverId, clean);
+      setSch(clean);
+      setSaved(clean);
+      setNote("Automation saved.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-edge bg-panel p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
+        <Icon name="clock" size={13} /> Automation
+      </div>
+
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={sch.restartOnCrash}
+          onChange={(e) => set("restartOnCrash", e.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span className="flex-1">
+          Restart automatically if it crashes
+          <span className="ml-1 text-[11px] text-ink-faint">
+            (give up after{" "}
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={sch.maxCrashRestarts}
+              onChange={(e) => set("maxCrashRestarts", Number(e.target.value) || 3)}
+              className="mx-0.5 w-12 rounded border border-edge bg-panel-2 px-1 py-0.5 text-center text-ink"
+            />
+            crashes in 15 min)
+          </span>
+        </span>
+      </label>
+
+      <label className="mt-2.5 flex items-center gap-2 text-sm">
+        <span className="flex-1">Restart every day at</span>
+        <input
+          type="time"
+          value={sch.dailyRestart ?? ""}
+          onChange={(e) => set("dailyRestart", e.target.value || null)}
+          className="rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink"
+        />
+      </label>
+      {sch.dailyRestart && (
+        <p className="mt-0.5 text-[11px] text-ink-faint">
+          Players get a <code>/say</code> warning ~1 min before. Local time.
+        </p>
+      )}
+
+      <label className="mt-2.5 flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={sch.backupOnStop}
+          onChange={(e) => set("backupOnStop", e.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span>
+          Back up every time the server stops
+          <span className="ml-1 text-[11px] text-ink-faint">
+            (counts toward the keep-limit)
+          </span>
+        </span>
+      </label>
+
+      <div className="mt-3 border-t border-edge pt-2">
+        <div className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
+          Timed commands
+        </div>
+        {sch.timedCommands.map((c, i) => (
+          <div key={i} className="mb-1 flex gap-1.5">
+            <input
+              type="time"
+              value={c.at}
+              onChange={(e) =>
+                set(
+                  "timedCommands",
+                  sch.timedCommands.map((x, j) => (j === i ? { ...x, at: e.target.value } : x)),
+                )
+              }
+              className="rounded border border-edge bg-panel-2 px-2 py-1 text-sm text-ink"
+            />
+            <input
+              value={c.command}
+              placeholder="save-all"
+              onChange={(e) =>
+                set(
+                  "timedCommands",
+                  sch.timedCommands.map((x, j) =>
+                    j === i ? { ...x, command: e.target.value } : x,
+                  ),
+                )
+              }
+              className="flex-1 rounded border border-edge bg-panel-2 px-2 py-1 font-mono text-xs text-ink outline-none focus:border-accent"
+            />
+            <button
+              className="px-1 text-ink-faint hover:text-bad"
+              onClick={() =>
+                set(
+                  "timedCommands",
+                  sch.timedCommands.filter((_, j) => j !== i),
+                )
+              }
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        <Button
+          variant="ghost"
+          onClick={() =>
+            set("timedCommands", [...sch.timedCommands, { at: "03:00", command: "" }])
+          }
+        >
+          + Add command
+        </Button>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <Button variant="primary" disabled={busy || !dirty} onClick={save}>
+          {busy ? "Saving…" : dirty ? "Save automation" : "Saved"}
+        </Button>
+        {note && <span className="text-[11px] text-ink-dim">{note}</span>}
+      </div>
+      {error && (
+        <div className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}

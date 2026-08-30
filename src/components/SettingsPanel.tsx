@@ -5,6 +5,7 @@ import { Button } from "./ui";
 import { RamSlider } from "./RamSlider";
 import { ShareSection } from "./ShareSection";
 import { BrandingSection } from "./BrandingSection";
+import { AutomationSection } from "./AutomationSection";
 
 type View = "common" | "advanced" | "raw";
 
@@ -113,6 +114,8 @@ export function SettingsPanel({
       </div>
 
       <BrandingSection serverId={server.id} />
+
+      <AutomationSection serverId={server.id} />
 
       <ShareSection server={server} onServersChanged={onServersChanged} />
 

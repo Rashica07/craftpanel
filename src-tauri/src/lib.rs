@@ -17,6 +17,7 @@ mod properties;
 mod provision;
 mod r2;
 mod rcon;
+mod schedule;
 mod session;
 mod settings;
 mod share;
@@ -84,6 +85,12 @@ pub fn run() {
             app.manage(DeviceId(device_id));
             app.manage(procs);
             app.manage(cloud);
+
+            // automation engine (auto-restart, daily restart, timed commands)
+            let offset = time::OffsetDateTime::now_local()
+                .map(|d| d.offset().whole_seconds())
+                .unwrap_or(0);
+            schedule::Scheduler::new(app.handle().clone(), offset).start();
 
             // --- tray icon: closing the window while a server runs hides here ---
             let show_i = MenuItem::with_id(app, "show", "Show CraftPanel", true, None::<&str>)?;
@@ -203,6 +210,8 @@ pub fn run() {
             commands::upnp_forward,
             commands::upnp_remove,
             commands::qr_svg,
+            commands::get_schedule,
+            commands::set_schedule,
             commands::list_worlds,
             commands::world_set_active,
             commands::world_create,

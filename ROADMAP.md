@@ -213,17 +213,21 @@ kept so a restore actually launches. Stored at
 - **Later:** download a backup out of the app; custom folder / R2 target;
   incremental (region-file-level) backups; a "restore preview" diff.
 
-#### 6.2 — Scheduler  ·
-`schedule.rs` + a tick loop in `ProcessManager`. Per-server config in the
-`settings` table (JSON under `schedule.<id>`):
-- **Auto-restart on a schedule** (e.g. daily 04:00) with an in-game
-  `say`/`title` countdown over RCON before it goes down.
-- **Auto-restart on crash** — bounded retries + exponential backoff, surfaced
-  in the console; gives up after N and shows why.
-- **Timed console/RCON commands** — cron-ish entries (nightly `save-all`,
-  announcements).
-- **Run windows** — only keep the server up between set hours.
-- On-stop backup hook → calls 6.1 with `trigger = scheduled`.
+#### 6.2 — Scheduler  ✓ (2026-08-30)
+`schedule.rs` — one 15 s background tick thread (`Scheduler`, spawned in
+`lib.rs` with the local UTC offset captured on the main thread). Per-server
+config is JSON in the `settings` table under `schedule.<id>`:
+- **Auto-restart on crash** ✓ — bounded (`maxCrashRestarts`, default 3),
+  counter resets after 15 min crash-free, escalating 5·n s backoff, "gave up"
+  message in the console.
+- **Daily restart** ✓ — `HH:MM` local; `/say` warning ~1 min before, `/say` +
+  graceful stop + relaunch at the time.
+- **Timed commands** ✓ — `[{at:"HH:MM", command}]`, run once/day over the
+  console.
+- **Backup on stop** ✓ — running→stopped transition → `backups::backup_now`
+  (`trigger = scheduled`) + prune.
+- UI: "Automation" section in Settings.
+- **Run windows** (only up between set hours) — still ·.
 
 #### 6.3 — World management  ·
 - List worlds (dirs with a `level.dat`), show active (`level-name`), seed,

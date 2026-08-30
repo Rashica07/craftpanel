@@ -14,6 +14,7 @@ use crate::branding;
 use crate::db::{Db, NewServer, ServerRecord};
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
+use crate::schedule::{self, Schedule};
 use crate::worlds::{self, WorldInfo};
 use crate::external::{self, ExternalStatus};
 use crate::java::{self, JavaInfo};
@@ -977,6 +978,20 @@ pub fn upnp_remove(db: State<Db>, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn qr_svg(text: String) -> Result<String, String> {
     net::qr_svg(&text)
+}
+
+// --- Stage 6.2: automation / scheduler --------------------------------------
+
+#[tauri::command]
+pub fn get_schedule(db: State<Db>, id: String) -> Result<Schedule, String> {
+    load(&db, &id)?;
+    Ok(schedule::read(&db, &id))
+}
+
+#[tauri::command]
+pub fn set_schedule(db: State<Db>, id: String, schedule: Schedule) -> Result<(), String> {
+    load(&db, &id)?;
+    schedule::write(&db, &id, &schedule)
 }
 
 // --- multi-device sharing (MVP: synced folder + advisory lease) ------------
