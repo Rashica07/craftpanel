@@ -7,6 +7,7 @@ import {
   Card,
   Field,
   ProgressBar,
+  SkeletonList,
   StateBlock,
   TextInput,
   Tooltip,
@@ -185,7 +186,7 @@ export function BackupsPanel({
         pad={false}
       >
         {!backups ? (
-          <StateBlock state="loading" title="Looking for backups…" compact />
+          <SkeletonList rows={4} />
         ) : backups.length === 0 ? (
           <StateBlock
             state="empty"

@@ -8,6 +8,7 @@ import {
   Card,
   Field,
   Modal,
+  SkeletonList,
   StateBlock,
   TextInput,
   Tooltip,
@@ -83,7 +84,7 @@ export function WorldsPanel({
         pad={false}
       >
         {!info ? (
-          <StateBlock state="loading" title="Looking for worlds…" compact />
+          <SkeletonList rows={2} />
         ) : info.worlds.length === 0 ? (
           <StateBlock
             state="empty"

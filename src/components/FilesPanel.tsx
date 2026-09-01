@@ -10,6 +10,7 @@ import {
   Field,
   IconButton,
   Modal,
+  SkeletonList,
   StateBlock,
   TextInput,
   Tooltip,
@@ -344,7 +345,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
           </div>
         )}
         {!listing ? (
-          <StateBlock state="loading" title="Reading the folder…" compact />
+          <SkeletonList rows={7} rowClassName="px-3 py-2" iconClassName="h-7 w-7" />
         ) : listing.entries.length === 0 ? (
           <StateBlock
             state="empty"

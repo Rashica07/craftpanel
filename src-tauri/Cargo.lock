@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "craftpanel"
-version = "2.5.5"
+version = "2.5.6"
 dependencies = [
  "argon2",
  "flate2",

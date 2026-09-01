@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   IconButton,
+  SkeletonList,
   StateBlock,
   Toggle,
   Tooltip,
@@ -167,7 +168,7 @@ export function ModsPanel({ serverId }: { serverId: string }) {
         pad={false}
       >
         {!list ? (
-          <StateBlock state="loading" title="Reading the mods folder…" compact />
+          <SkeletonList rows={5} rowClassName="px-3.5 py-2.5" iconClassName="h-5 w-9" />
         ) : list.mods.length === 0 ? (
           <StateBlock
             state="empty"

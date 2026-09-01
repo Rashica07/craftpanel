@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PlayerStat } from "../types";
 import { HISTORY_RANGES, rangeFor, type HistoryRange } from "../data/historyRanges";
-import { Badge, Card, IconButton, Segmented, StateBlock } from "./ui";
+import { Badge, Card, IconButton, Segmented, SkeletonChart, SkeletonList, StateBlock } from "./ui";
 import { AreaChart } from "./AreaChart";
 import { ErrorBanner } from "./ErrorBanner";
 
@@ -50,7 +50,9 @@ export function PlayerActivityChart({ serverId }: { serverId: string }) {
       {error ? (
         <ErrorBanner message={error} onRetry={load} />
       ) : !points ? (
-        <StateBlock state="loading" title="Reading logs…" compact />
+        <div style={{ height: 90 }}>
+          <SkeletonChart bars={28} />
+        </div>
       ) : (
         <AreaChart
           data={points}
@@ -109,7 +111,12 @@ export function PlayerHistory({ serverId }: { serverId: string }) {
       {error ? (
         <ErrorBanner message={error} onRetry={load} />
       ) : !rows ? (
-        <StateBlock state="loading" title="Reading logs…" compact />
+        <SkeletonList
+          rows={4}
+          listClassName="space-y-1"
+          rowClassName="rounded-md bg-surface-2 px-2 py-1.5"
+          iconClassName="h-3.5 w-16 rounded"
+        />
       ) : rows.length === 0 ? (
         <StateBlock
           state="empty"

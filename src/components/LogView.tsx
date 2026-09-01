@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { Badge, Button, IconButton, StateBlock, cx } from "./ui";
+import { Badge, Button, IconButton, SkeletonLines, StateBlock, cx } from "./ui";
 import { Icon } from "./Icon";
 
 /**
@@ -97,7 +97,7 @@ export function LogView({
           onRetry={() => fetchTail(true)}
         />
       ) : text === null ? (
-        <StateBlock state="loading" title="Reading the log file…" />
+        <SkeletonLines lines={16} className="cp-well min-h-0 flex-1" />
       ) : (
         <pre
           ref={boxRef}

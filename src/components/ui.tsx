@@ -50,6 +50,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -1184,8 +1185,99 @@ export function Spinner({ size = 14, className = "" }: { size?: number; classNam
   );
 }
 
-export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={cx("cp-skeleton rounded-md", className)} />;
+export function Skeleton({
+  className = "",
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return <div className={cx("cp-skeleton rounded-md", className)} style={style} />;
+}
+
+/** Row opacity for skeleton stacks — fades toward the bottom so a short
+ * list doesn't read as "exactly 5 things are coming", it reads as "more
+ * below, still loading". */
+function fade(i: number) {
+  return Math.max(0.32, 1 - i * 0.15);
+}
+
+/**
+ * Placeholder rows shaped like the icon-square + text lists most panels use
+ * (Files, Backups, Mods, Worlds, Players…) — swap in for StateBlock's
+ * spinner so the panel doesn't jump from a centered spinner to a full list.
+ */
+export function SkeletonList({
+  rows = 5,
+  rowClassName = "px-3.5 py-3",
+  iconClassName = "h-8 w-8",
+  listClassName = "divide-y divide-line-soft",
+}: {
+  rows?: number;
+  rowClassName?: string;
+  iconClassName?: string;
+  listClassName?: string;
+}) {
+  const widths = ["w-2/5", "w-1/3", "w-1/2", "w-1/4", "w-2/5", "w-1/3"];
+  return (
+    <ul className={listClassName} aria-hidden="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <li
+          key={i}
+          className={cx("flex items-center gap-2.5", rowClassName)}
+          style={{ opacity: fade(i) }}
+        >
+          <Skeleton className={cx("shrink-0", iconClassName)} />
+          <Skeleton className={cx("h-3.5", widths[i % widths.length])} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Placeholder lines for monospace/log-shaped text content. */
+export function SkeletonLines({
+  lines = 12,
+  className = "",
+}: {
+  lines?: number;
+  className?: string;
+}) {
+  const widths = ["w-11/12", "w-2/3", "w-4/5", "w-1/2", "w-3/4", "w-5/6", "w-3/5", "w-1/3"];
+  return (
+    <div className={cx("space-y-2 px-3 py-2.5", className)} aria-hidden="true">
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton
+          key={i}
+          className={cx("h-2.5", widths[i % widths.length])}
+          style={{ opacity: fade(i * 0.4) }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Placeholder bars for a chart that hasn't loaded yet — heights are a fixed
+ * pseudo-random-looking sequence, not real data, just a shape to fill. */
+export function SkeletonChart({
+  bars = 24,
+  className = "",
+}: {
+  bars?: number;
+  className?: string;
+}) {
+  const seq = [40, 62, 35, 78, 50, 30, 65, 45, 82, 55, 38, 70, 48, 60, 33, 75, 52, 42, 68, 58, 36, 72, 46, 64];
+  return (
+    <div className={cx("flex h-full items-end gap-1", className)} aria-hidden="true">
+      {Array.from({ length: bars }).map((_, i) => (
+        <Skeleton
+          key={i}
+          className="w-full rounded-sm"
+          style={{ height: `${seq[i % seq.length]}%` }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function ProgressBar({

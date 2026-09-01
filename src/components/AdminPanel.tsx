@@ -8,7 +8,7 @@ import {
   Card,
   IconButton,
   SettingRow,
-  StateBlock,
+  SkeletonList,
   TextInput,
   Toggle,
 } from "./ui";
@@ -164,9 +164,14 @@ export function AdminPanel({
 
   if (!lists)
     return (
-      <Card>
-        <StateBlock state="loading" title="Reading the player lists…" compact />
-      </Card>
+      <div className="space-y-3">
+        <Card pad={false}>
+          <SkeletonList rows={1} rowClassName="px-3.5 py-3" iconClassName="h-5 w-9" />
+        </Card>
+        <Card pad={false}>
+          <SkeletonList rows={3} />
+        </Card>
+      </div>
     );
 
   return (
