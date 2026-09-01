@@ -38,6 +38,7 @@ mod schedule;
 mod session;
 mod settings;
 mod share;
+mod snapshots;
 mod sync;
 mod system;
 mod tunnel;
@@ -268,6 +269,10 @@ pub fn run() {
             commands::restore_backup,
             commands::get_backups_config,
             commands::set_backups_keep,
+            commands::snapshot_now,
+            commands::list_snapshots,
+            commands::restore_snapshot,
+            commands::delete_snapshot,
             commands::fs_list,
             commands::fs_read,
             commands::fs_write,

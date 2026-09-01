@@ -250,6 +250,24 @@ export interface Schedule {
   backupOnStop: boolean;
   intervalBackupHours: number | null;
   cloudBackup: boolean;
+  /** minutes between automatic Time Machine snapshots while running; null/0 = off */
+  snapshotIntervalMins: number | null;
+  /** keep every snapshot from within this many hours (0 = default 24) */
+  snapshotKeepRecentHours: number;
+  /** beyond that, thin to one snapshot/day for this many days (0 = default 30) */
+  snapshotKeepDailyDays: number;
+}
+
+/** A cheap, frequent, hardlink-based rollback point — see `snapshots.rs`.
+ * Distinct from `Backup` (a full zip): snapshots are local-only, fast, and
+ * meant to be taken every 15 min or so without meaningful disk cost. */
+export interface Snapshot {
+  id: string;
+  createdAt: number;
+  trigger: "manual" | "scheduled";
+  /** bytes actually written fresh — 0 means this snapshot cost nothing */
+  newBytes: number;
+  fileCount: number;
 }
 
 export interface ModrinthHit {

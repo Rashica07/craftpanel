@@ -21,6 +21,7 @@ import {
   Tabs,
   TextInput,
   Toggle,
+  cx,
   toast,
   type TabDef,
 } from "./ui";
@@ -84,6 +85,14 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AppSettings>(DEFAULTS);
   const [saved, setSaved] = useState<AppSettings>(DEFAULTS);
   const [busy, setBusy] = useState(false);
+  // Tabs stay mounted (hidden, not destroyed) once visited — switching tabs
+  // used to unmount the previous one, throwing away anything it had fetched
+  // (e.g. a "check for updates" result) or, before this was lifted into `s`
+  // below, anything typed but not yet saved.
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set(["general"]));
+  useEffect(() => {
+    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
+  }, [tab]);
 
   useEffect(() => {
     api
@@ -142,16 +151,40 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
         </div>
       </header>
 
-      <div key={tab} className="cp-in min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
-        <div className="mx-auto max-w-2xl space-y-4">
-          {tab === "general" && <GeneralTab s={s} set={set} />}
-          {tab === "account" && <AccountTab />}
-          {tab === "updates" && <UpdatesTab s={s} set={set} onDirtySave={dirty ? save : undefined} />}
-          {tab === "java" && <JavaTab s={s} set={set} />}
-          {tab === "cloud" && <CloudTab />}
-          {tab === "diagnostics" && <DiagnosticsTab />}
-          {tab === "about" && <AboutTab githubRepo={s.githubRepo} />}
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+        <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "general" && "hidden")}>
+          <GeneralTab s={s} set={set} />
         </div>
+        {visited.has("account") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "account" && "hidden")}>
+            <AccountTab />
+          </div>
+        )}
+        {visited.has("updates") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "updates" && "hidden")}>
+            <UpdatesTab s={s} set={set} onDirtySave={dirty ? save : undefined} />
+          </div>
+        )}
+        {visited.has("java") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "java" && "hidden")}>
+            <JavaTab s={s} set={set} />
+          </div>
+        )}
+        {visited.has("cloud") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "cloud" && "hidden")}>
+            <CloudTab />
+          </div>
+        )}
+        {visited.has("diagnostics") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "diagnostics" && "hidden")}>
+            <DiagnosticsTab />
+          </div>
+        )}
+        {visited.has("about") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "about" && "hidden")}>
+            <AboutTab githubRepo={s.githubRepo} />
+          </div>
+        )}
       </div>
     </div>
   );

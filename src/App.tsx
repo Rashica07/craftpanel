@@ -6,8 +6,9 @@ import { TemplateModal } from "./components/TemplateModal";
 import { JoinSharedModal } from "./components/JoinSharedModal";
 import { SettingsPage } from "./components/SettingsPage";
 import { LockScreen } from "./components/LockScreen";
-import { ServerDetail } from "./components/ServerDetail";
+import { ServerDetail, type Tab as ServerTab } from "./components/ServerDetail";
 import { Dashboard } from "./components/Dashboard";
+import { CommandPalette } from "./components/CommandPalette";
 import {
   SERVER_TYPE_META,
   STATUS_META,
@@ -362,6 +363,8 @@ export default function App() {
   const [showDashboard, setShowDashboard] = useState(true);
   const [showJoin, setShowJoin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [requestedTab, setRequestedTab] = useState<ServerTab | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [players, setPlayers] = useState<Record<string, string>>({});
@@ -428,17 +431,29 @@ export default function App() {
     };
   }, [servers, runtimes]);
 
-  // ⌘N / Ctrl+N → new server
+  // ⌘N / Ctrl+N → new server, ⌘K / Ctrl+K → command palette
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "n") {
         e.preventDefault();
         setShowCreate(true);
+      } else if (key === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  function goToServer(id: string, tab?: ServerTab) {
+    setShowSettings(false);
+    setShowDashboard(false);
+    setSelectedId(id);
+    setRequestedTab(tab);
+  }
 
   const selected = servers.find((s) => s.id === selectedId) ?? null;
   const runningCount = servers.filter(
@@ -540,11 +555,7 @@ export default function App() {
                 status={statusOf(runtimes, s.id)}
                 selected={!showSettings && !showDashboard && s.id === selectedId}
                 players={players[s.id] ?? null}
-                onSelect={() => {
-                  setShowSettings(false);
-                  setShowDashboard(false);
-                  setSelectedId(s.id);
-                }}
+                onSelect={() => goToServer(s.id)}
               />
             ))
           )}
@@ -592,10 +603,7 @@ export default function App() {
           <Dashboard
             servers={servers}
             runtimes={runtimes}
-            onOpen={(id) => {
-              setShowDashboard(false);
-              setSelectedId(id);
-            }}
+            onOpen={(id) => goToServer(id)}
             onStart={async (id) => {
               try {
                 await api.startServer(id);
@@ -617,6 +625,8 @@ export default function App() {
             server={selected}
             runtime={runtimes[selected.id]}
             onServersChanged={refresh}
+            initialTab={requestedTab}
+            onInitialTabConsumed={() => setRequestedTab(undefined)}
           />
         ) : (
           <Welcome
@@ -667,6 +677,39 @@ export default function App() {
           }}
         />
       )}
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        servers={servers}
+        runtimes={runtimes}
+        onGoToServer={goToServer}
+        onOpenSettings={() => {
+          setShowDashboard(false);
+          setShowSettings(true);
+        }}
+        onOpenDashboard={() => {
+          setShowSettings(false);
+          setShowDashboard(true);
+        }}
+        onCreate={() => setShowCreate(true)}
+        onAdd={() => setShowAdd(true)}
+        onJoin={() => setShowJoin(true)}
+        onQuickStart={() => setShowQuickStart(true)}
+        onStart={async (id) => {
+          try {
+            await api.startServer(id);
+          } catch (e) {
+            toast.bad("Couldn't start it", String(e));
+          }
+        }}
+        onStop={async (id) => {
+          try {
+            await api.stopServer(id);
+          } catch (e) {
+            toast.bad("Couldn't stop it", String(e));
+          }
+        }}
+      />
       <Toaster />
     </div>
   );

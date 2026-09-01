@@ -44,6 +44,15 @@ pub struct Schedule {
     /// it's uploaded locally. Silently skipped if R2 isn't configured —
     /// this is a bonus on top of local backups, never a hard requirement.
     pub cloud_backup: bool,
+    /// minutes between automatic hardlink "Time Machine" snapshots while the
+    /// server is running — cheap, frequent rollback points, distinct from
+    /// the full zip `Backup`s above. `None`/`0` = off. Floored at 5 min.
+    pub snapshot_interval_mins: Option<u32>,
+    /// keep every snapshot from within this many hours (default 24 if unset/0)
+    pub snapshot_keep_recent_hours: u32,
+    /// beyond the recent window, thin to one snapshot per day for this many
+    /// days (default 30 if unset/0)
+    pub snapshot_keep_daily_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,12 +72,19 @@ impl Schedule {
             && !self.backup_on_stop
             && self.interval_backup_hours.unwrap_or(0) == 0
             && !self.cloud_backup
+            && self.snapshot_interval_mins.unwrap_or(0) == 0
     }
     fn max_restarts(&self) -> u32 {
         if self.max_crash_restarts == 0 { 3 } else { self.max_crash_restarts }
     }
     fn warning(&self) -> u32 {
         if self.restart_warning_secs == 0 { 60 } else { self.restart_warning_secs }
+    }
+    pub(crate) fn snapshot_recent_hours(&self) -> u32 {
+        if self.snapshot_keep_recent_hours == 0 { 24 } else { self.snapshot_keep_recent_hours }
+    }
+    pub(crate) fn snapshot_daily_days(&self) -> u32 {
+        if self.snapshot_keep_daily_days == 0 { 30 } else { self.snapshot_keep_daily_days }
     }
 }
 
@@ -126,6 +142,8 @@ struct DayState {
     /// right after an app restart, since this is in-memory only, same as
     /// every other tracker in this struct)
     last_interval_backup: i64,
+    /// unix epoch of the last Time Machine snapshot — 0 means "never"
+    last_snapshot: i64,
 }
 
 pub struct Scheduler {
@@ -223,6 +241,50 @@ impl Scheduler {
                             "text": format!("[scheduler] scheduled backup failed: {e}") }),
                     );
                     notify_discord_backup_failed(&app, &id);
+                }
+            }
+        });
+    }
+
+    /// Take a hardlink "Time Machine" snapshot, wrapped in a best-effort
+    /// save-off/save-all/save-on pair over stdin so it's less likely to
+    /// catch a region file mid-write — same mechanism `timed_commands`/the
+    /// daily-restart warning already use (raw stdin, not RCON). If the
+    /// server doesn't respond in time the snapshot still runs; this is
+    /// strictly an improvement over the zip backups above, which don't
+    /// coordinate saves at all, never a regression. Own thread, same
+    /// reasoning as `run_backup`.
+    fn run_snapshot(&self, id: &str, dir: &str, keep_recent_hours: u32, keep_daily_days: u32) {
+        let dir_s = dir.to_string();
+        let id = id.to_string();
+        let app = self.app.clone();
+        std::thread::spawn(move || {
+            let p = std::path::Path::new(&dir_s);
+            if let Some(procs) = app.try_state::<ProcessManager>() {
+                let _ = procs.write_stdin(&id, "save-off");
+                let _ = procs.write_stdin(&id, "save-all flush");
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+            let result = crate::snapshots::snapshot_now(p, "scheduled", &|_| {});
+            if let Some(procs) = app.try_state::<ProcessManager>() {
+                let _ = procs.write_stdin(&id, "save-on");
+            }
+            match result {
+                Ok(_) => {
+                    crate::snapshots::prune(p, keep_recent_hours, keep_daily_days);
+                    let _ = app.emit(
+                        "server:log",
+                        serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                            "text": "[scheduler] snapshot taken" }),
+                    );
+                }
+                Err(e) => {
+                    let _ = app.emit(
+                        "server:log",
+                        serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
+                            "text": format!("[scheduler] snapshot failed: {e}") }),
+                    );
+                    notify_discord_snapshot_failed(&app, &id);
                 }
             }
         });
@@ -326,6 +388,24 @@ impl Scheduler {
                 }
             }
 
+            // --- Time Machine snapshot (independent of the zip backups above) ---
+            if running {
+                if let Some(mins) = sch.snapshot_interval_mins.filter(|m| *m > 0) {
+                    let interval_secs = mins.max(5) as i64 * 60;
+                    if now_epoch - ds.last_snapshot >= interval_secs {
+                        ds.last_snapshot = now_epoch;
+                        drop(st);
+                        self.run_snapshot(
+                            &rec.id,
+                            &rec.path,
+                            sch.snapshot_recent_hours(),
+                            sch.snapshot_daily_days(),
+                        );
+                        continue;
+                    }
+                }
+            }
+
             // --- daily restart with countdown ---
             if running {
                 if let Some((h, m)) = sch.daily_restart.as_deref().and_then(parse_hhmm) {
@@ -396,6 +476,24 @@ fn notify_discord_backup_failed(app: &AppHandle, server_id: &str) {
     crate::discord::notify(url, format!("🟠 **{name}** scheduled backup failed — check the console."));
 }
 
+/// Same reasoning as `notify_discord_backup_failed` — only pings on
+/// failure, snapshots are frequent enough that a success ping would be noise.
+fn notify_discord_snapshot_failed(app: &AppHandle, server_id: &str) {
+    let Some(db) = app.try_state::<Db>() else { return };
+    let url = crate::commands::read_app_settings(&db).discord_webhook_url;
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    let name = db
+        .get_server(server_id)
+        .ok()
+        .flatten()
+        .map(|r| r.name)
+        .unwrap_or_else(|| server_id.to_string());
+    crate::discord::notify(url, format!("🟠 **{name}** scheduled snapshot failed — check the console."));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,6 +506,18 @@ mod tests {
         assert!(!Schedule { scheduled_start: Some("06:00".into()), ..Default::default() }.is_default());
         // 0 hours is the same as "off", same as None
         assert!(Schedule { interval_backup_hours: Some(0), ..Default::default() }.is_default());
+        assert!(!Schedule { snapshot_interval_mins: Some(15), ..Default::default() }.is_default());
+        assert!(Schedule { snapshot_interval_mins: Some(0), ..Default::default() }.is_default());
+    }
+
+    #[test]
+    fn snapshot_retention_defaults_apply_only_when_unset() {
+        let s = Schedule::default();
+        assert_eq!(s.snapshot_recent_hours(), 24);
+        assert_eq!(s.snapshot_daily_days(), 30);
+        let s = Schedule { snapshot_keep_recent_hours: 6, snapshot_keep_daily_days: 7, ..Default::default() };
+        assert_eq!(s.snapshot_recent_hours(), 6);
+        assert_eq!(s.snapshot_daily_days(), 7);
     }
 
     #[test]

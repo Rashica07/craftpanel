@@ -53,6 +53,7 @@ import type {
   ServerSettings,
   ShareInfo,
   ShareView,
+  Snapshot,
   SystemInfo,
   TunnelStatus,
   VersionInfo,
@@ -240,6 +241,21 @@ export const api = {
     return listen<{ serverId: string; message: string }>("backup:progress", (e) =>
       fn(e.payload),
     );
+  },
+
+  // Time Machine snapshots — reuses the "backup:progress" event for restore
+  // progress, same mechanism as the zip backups above.
+  snapshotNow(id: string): Promise<Snapshot> {
+    return invoke("snapshot_now", { id });
+  },
+  listSnapshots(id: string): Promise<Snapshot[]> {
+    return invoke("list_snapshots", { id });
+  },
+  restoreSnapshot(id: string, snapshotId: string): Promise<void> {
+    return invoke("restore_snapshot", { id, snapshotId });
+  },
+  deleteSnapshot(id: string, snapshotId: string): Promise<void> {
+    return invoke("delete_snapshot", { id, snapshotId });
   },
 
   // Stage 4.7 — files + logs + admin

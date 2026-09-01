@@ -16,6 +16,7 @@ import {
 } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
+import { SnapshotTimeline } from "./SnapshotTimeline";
 
 function size(bytes: number) {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
@@ -105,6 +106,8 @@ export function BackupsPanel({
 
   return (
     <div className="cp-stagger h-full space-y-3 overflow-y-auto pr-1">
+      <SnapshotTimeline serverId={serverId} locked={locked} />
+
       <Card
         title="Make a backup"
         icon="archive"

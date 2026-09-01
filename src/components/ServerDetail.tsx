@@ -46,7 +46,7 @@ import { STATUS_TONE } from "../App";
 import { ChangeVersionModal } from "./ChangeVersionModal";
 import { CloneServerModal } from "./CloneServerModal";
 
-type Tab =
+export type Tab =
   | "console"
   | "network"
   | "players"
@@ -167,10 +167,17 @@ export function ServerDetail({
   server,
   runtime,
   onServersChanged,
+  initialTab,
+  onInitialTabConsumed,
 }: {
   server: ServerRecord;
   runtime: ProcSnapshot | undefined;
   onServersChanged: () => void;
+  /** Jump straight to this tab on mount/update — set by the command palette.
+   * Consumed once (via `onInitialTabConsumed`) so a later plain tab click
+   * isn't fought by a stale request. */
+  initialTab?: Tab;
+  onInitialTabConsumed?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,6 +185,14 @@ export function ServerDetail({
   const [eulaOk, setEulaOk] = useState<boolean | null>(null);
   const [showEula, setShowEula] = useState(false);
   const [tab, setTab] = useState<Tab>("console");
+  // Tabs stay mounted (hidden, not destroyed) once visited — switching tabs
+  // used to unmount the previous one, which threw away any typed-but-
+  // unsaved state in it (e.g. a scheduled-start time set in Settings before
+  // hitting Save). Console is visited from the start since it's the default.
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set(["console"]));
+  useEffect(() => {
+    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
+  }, [tab]);
   const [browseQuery, setBrowseQuery] = useState<string | undefined>(undefined);
   const [consoleMode, setConsoleMode] = useState<"live" | "log">("live");
   const [pendingRestart, setPendingRestart] = useState(false);
@@ -211,12 +226,27 @@ export function ServerDetail({
       (isCloud && !!cloud?.locked && !cloud.heldByUs));
 
   useEffect(() => {
-    setTab("console");
+    setTab(initialTab ?? "console");
     setConsoleMode("live");
     setPendingRestart(false);
     setCrashDismissed(false);
     setSuspectDisabled(false);
+    onInitialTabConsumed?.();
+    // deliberately server.id only — initialTab/onInitialTabConsumed are read
+    // fresh each time this fires, the second effect below handles a tab
+    // request arriving for the *same* server that's already mounted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [server.id]);
+
+  // same-server tab jump (e.g. palette action "ServerX → Files" while
+  // already viewing ServerX) — the effect above only fires on server switch
+  useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab);
+      onInitialTabConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
 
   // a fresh crash report means a fresh suspect — don't keep showing
   // "Disabled" for last time's culprit
@@ -770,48 +800,48 @@ export function ServerDetail({
         </div>
       )}
 
-      {/* ─────────────────────── panel ─────────────────────── */}
-      <div key={tab} className="cp-in min-h-0 flex-1 px-6 pb-6 pt-4">
-        {tab === "console" && (
-          <div className="flex h-full flex-col gap-3">
-            <HealthStrip serverId={server.id} live={active || externalRunning} />
-            <div className="flex items-center gap-2">
-              <Segmented
-                value={consoleMode}
-                onChange={setConsoleMode}
-                options={[
-                  { value: "live", label: "Live console", icon: "terminal" },
-                  { value: "log", label: "Log file", icon: "file" },
-                ]}
-              />
-              {runtime?.reattached && consoleMode === "live" && (
-                <span className="text-2xs text-ink-faint">
-                  This server was adopted, so there's no live stream — use the
-                  log file.
-                </span>
-              )}
-            </div>
-            <div className="min-h-0 flex-1">
-              {consoleMode === "live" ? (
-                <ConsoleView
-                  serverId={server.id}
-                  canSend={
-                    (status === "running" || status === "starting") &&
-                    !runtime?.reattached
-                  }
-                />
-              ) : (
-                <LogView
-                  serverId={server.id}
-                  live={active || externalRunning}
-                />
-              )}
-            </div>
+      {/* ─────────────────────── panel ───────────────────────
+          Every visited tab stays mounted (just hidden) from here on — see
+          the `visited` comment above. */}
+      <div className="min-h-0 flex-1 px-6 pb-6 pt-4">
+        <div className={cx("flex h-full flex-col gap-3", tab !== "console" && "hidden")}>
+          <HealthStrip serverId={server.id} live={active || externalRunning} />
+          <div className="flex items-center gap-2">
+            <Segmented
+              value={consoleMode}
+              onChange={setConsoleMode}
+              options={[
+                { value: "live", label: "Live console", icon: "terminal" },
+                { value: "log", label: "Log file", icon: "file" },
+              ]}
+            />
+            {runtime?.reattached && consoleMode === "live" && (
+              <span className="text-2xs text-ink-faint">
+                This server was adopted, so there's no live stream — use the
+                log file.
+              </span>
+            )}
           </div>
-        )}
+          <div className="min-h-0 flex-1">
+            {consoleMode === "live" ? (
+              <ConsoleView
+                serverId={server.id}
+                canSend={
+                  (status === "running" || status === "starting") &&
+                  !runtime?.reattached
+                }
+              />
+            ) : (
+              <LogView
+                serverId={server.id}
+                live={active || externalRunning}
+              />
+            )}
+          </div>
+        </div>
 
-        {tab === "players" && (
-          <div className="h-full space-y-3 overflow-y-auto pr-1">
+        {visited.has("players") && (
+          <div className={cx("h-full space-y-3 overflow-y-auto pr-1", tab !== "players" && "hidden")}>
             <RconPanel
               serverId={server.id}
               reachable={reachable}
@@ -830,38 +860,56 @@ export function ServerDetail({
           </div>
         )}
 
-        {tab === "settings" && (
-          <SettingsPanel
-            server={server}
-            locked={active || externalRunning}
-            onServersChanged={onServersChanged}
-            onNeedsRestart={() => setPendingRestart(true)}
-          />
+        {visited.has("settings") && (
+          <div className={cx("h-full", tab !== "settings" && "hidden")}>
+            <SettingsPanel
+              server={server}
+              locked={active || externalRunning}
+              onServersChanged={onServersChanged}
+              onNeedsRestart={() => setPendingRestart(true)}
+            />
+          </div>
         )}
-        {tab === "mods" && hasMods && <ModsPanel serverId={server.id} />}
-        {tab === "browse" && (
-          <BrowsePanel
-            serverId={server.id}
-            serverType={server.server_type}
-            onNeedsRestart={() => setPendingRestart(true)}
-            initialQuery={browseQuery}
-          />
+        {hasMods && visited.has("mods") && (
+          <div className={cx("h-full", tab !== "mods" && "hidden")}>
+            <ModsPanel serverId={server.id} />
+          </div>
         )}
-        {tab === "worlds" && (
-          <WorldsPanel
-            serverId={server.id}
-            locked={active || externalRunning}
-          />
+        {visited.has("browse") && (
+          <div className={cx("h-full", tab !== "browse" && "hidden")}>
+            <BrowsePanel
+              serverId={server.id}
+              serverType={server.server_type}
+              onNeedsRestart={() => setPendingRestart(true)}
+              initialQuery={browseQuery}
+            />
+          </div>
         )}
-        {tab === "network" && (
-          <NetworkPanel serverId={server.id} serverType={server.server_type} />
+        {visited.has("worlds") && (
+          <div className={cx("h-full", tab !== "worlds" && "hidden")}>
+            <WorldsPanel
+              serverId={server.id}
+              locked={active || externalRunning}
+            />
+          </div>
         )}
-        {tab === "files" && <FilesPanel serverId={server.id} />}
-        {tab === "backups" && (
-          <BackupsPanel
-            serverId={server.id}
-            locked={active || externalRunning}
-          />
+        {visited.has("network") && (
+          <div className={cx("h-full", tab !== "network" && "hidden")}>
+            <NetworkPanel serverId={server.id} serverType={server.server_type} />
+          </div>
+        )}
+        {visited.has("files") && (
+          <div className={cx("h-full", tab !== "files" && "hidden")}>
+            <FilesPanel serverId={server.id} />
+          </div>
+        )}
+        {visited.has("backups") && (
+          <div className={cx("h-full", tab !== "backups" && "hidden")}>
+            <BackupsPanel
+              serverId={server.id}
+              locked={active || externalRunning}
+            />
+          </div>
         )}
       </div>
 

@@ -1643,6 +1643,125 @@ Six features approved together, shipped as v2.5.5:
 **Verified:** `cargo build`/`cargo test` clean (147 passed) at v2.5.5,
 `npx tsc --noEmit` clean on the frontend.
 
+## Batch 28 — skeleton loading, tab-state persistence bugfix (v2.5.6, 2026-09-01)
+
+- **Skeleton loading states** — new `SkeletonList`/`SkeletonLines`/
+  `SkeletonChart` primitives in [ui.tsx](src/components/ui.tsx) (building on
+  the existing `Skeleton` shimmer), swapped in for the centered spinner in
+  Files, Backups, Mods, Worlds, Players/Admin, the console log, and player
+  history — shaped like each panel's real rows/chart so nothing jumps when
+  data lands.
+- **Bugfix — typed-but-unsaved state vanished on tab switch.** Every tab
+  switch, both in app Settings and in a server's own tabs, was a hard
+  unmount/remount, so anything typed but not yet saved (a webhook URL, a
+  scheduled-start time) or fetched (an update-check result) was thrown away.
+  Root cause: `{tab === "x" && <Component/>}` conditionals in
+  [SettingsPage.tsx](src/components/SettingsPage.tsx) and
+  [ServerDetail.tsx](src/components/ServerDetail.tsx). Fixed by keeping
+  every visited tab mounted (hidden via CSS, not destroyed) — a `visited`
+  Set gates which tabs have ever rendered, and `tab !== id && "hidden"`
+  toggles visibility instead of a conditional mount.
+
+## Batch 29 — "Time Machine" snapshots, command palette (v2.6.0, 2026-09-01)
+
+- **Time Machine snapshots** — [snapshots.rs](src-tauri/src/snapshots.rs)
+  (new module). Cheap, frequent, hardlink-based rollback points under
+  `<server>/craftpanel-snapshots/<id>/`: a file unchanged since the previous
+  snapshot is hard-linked (same inode, ~0 extra disk), only what actually
+  changed gets copied — the same trick `rsync --link-dest`/macOS Time
+  Machine itself use, so deleting an old snapshot never touches data a newer
+  one still links to. Distinct from the existing zip `Backup`s (which
+  remain the durable, cloud-syncable format) — snapshots are local-only and
+  meant to run every 15 min or so for near-zero cost.
+  - Tiered retention (`snapshots::prune`): keep everything from the last N
+    hours, thin to one-per-day beyond that, drop anything past the daily
+    window entirely.
+  - Restore takes a full zip safety-net backup first (reuses
+    `backups::backup_now`), same "never delete, move aside" contract as
+    `backups::restore`.
+  - Scheduled via [schedule.rs](src-tauri/src/schedule.rs)'s existing
+    15s-tick engine (`snapshot_interval_mins`/`snapshot_keep_recent_hours`/
+    `snapshot_keep_daily_days` on `Schedule`), wrapped in a best-effort
+    `save-off`/`save-all flush`/`save-on` over stdin so it's less likely to
+    catch a region file mid-write — reuses the exact mechanism
+    `timed_commands` already sends commands through, no new RCON/process
+    plumbing needed.
+  - New timeline UI — [SnapshotTimeline.tsx](src/components/SnapshotTimeline.tsx),
+    a horizontal scrubber (tick per snapshot) in the Backups tab. Cadence +
+    retention configured in Settings → Automation, next to the existing
+    backup fields.
+- **Command palette (⌘K / Ctrl+K)** — [CommandPalette.tsx](src/components/CommandPalette.tsx).
+  Fuzzy-matches servers, server tabs, and top-level actions (new server,
+  settings, overview, start/stop) from anywhere in the app — same
+  `window`-level keydown pattern the existing ⌘N shortcut in
+  [App.tsx](src/App.tsx) already used. `ServerDetail` gained an `initialTab`
+  prop (consumed once) so a palette entry like "MyServer → Files" can jump
+  straight to a tab from outside the component, which previously had no way
+  to reach `ServerDetail`'s tab state at all.
+- **Versioning note:** shipped as 2.6.0, not 3.0.0 — evaluated and decided
+  against a major bump. This batch is additive and backward-compatible
+  (semver-wise a minor release), and isn't a bigger leap than several
+  batches already shipped under 2.x (the visual redesign, cloud sync,
+  Bedrock/modpacks, Windows support). Reserving 3.0.0 for either a real
+  chunk of the bigger "juggernaut" pitch (mesh nodes, a real automation
+  engine, multi-game support) or an actual premium/paid tier to mark.
+
+**Verified:** `cargo build`/`cargo test` clean (154 passed, including 6 new
+snapshot tests covering hardlink reuse, safe deletion of a snapshot whose
+files are still linked from a newer one, restore, and tiered pruning) at
+v2.6.0. `npx tsc --noEmit` and `npm run build` clean on the frontend.
+
+## Batch 30 — Discord companion bot (`bot/`, 2026-09-01)
+
+Separate Node.js/TypeScript project alongside `mobile/`, not part of the DMG.
+Runs on the same machine/LAN as the desktop app and talks to its Remote API
+(`remote_api.rs`, :8642) — no hosted backend. Built from a spec the user
+pasted; `discord.js` v14, zero native deps (`node:sqlite` for leveling,
+`systeminformation` is pure JS).
+
+- **`services/craftPanel.ts`** — bridge to the local Remote API. Every call
+  returns a `PanelResult<T>` (`{ok:true,data}` | `{ok:false,error}`), 5s
+  `AbortController` timeout, never throws. Auto-discovers the bearer token
+  from the app's own `remote_api.json` in the platform config dir if
+  `PANEL_TOKEN` isn't set — a bot next to the app needs almost no config.
+  `PanelServer` fields matched to `db::ServerRecord` + the process snapshot
+  (`server_type`, `mc_version`, `status`, `started_at`; no `port` in the
+  payload — kept optional for forward-compat).
+- **`/status`** (admin) — public IP via `api.ipify.org`, tunnel address
+  (best-effort read of an optional `tunnels.json`; `tunnel.rs` keeps it
+  in-memory only today, so "none detected" is the honest fallback), per-server
+  status + uptime.
+- **`/manage start|stop|restart`** (admin) — name-or-id resolution, drives the
+  Remote API start/stop endpoints.
+- **`/moderation kick|ban|timeout`** — role-hierarchy + bot-permission checks,
+  optional mod-log embed. Timeout uses native `member.timeout(ms)`.
+- **`/rank show|top`** — MEE6-style, XP curve `100·L²` (spec's), 60s per-user
+  cooldown, in-memory cooldown map with a 5-min sweeper.
+- **`events/voiceState.ts`** — Join-to-Create: clone the creator channel, move
+  the member, delete when empty. `reconcileOrphans` on boot cleans up lobbies
+  (recognised by the "💬 " name prefix) left by a previous run.
+- **`events/message.ts`** — automod (configurable regex blacklist + link-spam
+  + mass-mention heuristics; delete + 5s self-destruct warning) then XP.
+- **`monitor.ts`** — 60s `si.cpuTemperature()`/`si.graphics()` poll; over
+  threshold (default 85 °C) POSTs an `@owner` webhook embed. Hysteresis +
+  cooldown so it doesn't spam; after 3 empty sensor reads it logs once and
+  goes quiet (common on Macs without sensor access).
+- **`scripts/setupServer.ts`** (`npm run setup-server`) — one-shot guild
+  scaffolder from a second user-pasted script: roles, categories, channels,
+  and a permanent verification button. Adapted from the raw paste: idempotent
+  `ensureChannel`/`ensureCategory` instead of blind creates, the destructive
+  channel-wipe gated behind an explicit `--wipe` flag + 3s warning, bugs
+  fixed (`createRole`→`roles.create`, typo'd comment). The button's runtime
+  half is **`events/verify.ts`** (grants the `Verified` role); button id +
+  role name are shared constants so they can't drift.
+
+**Verified:** `npx tsc --noEmit` clean, `npm run build` clean. Live
+read-only test against the user's running Remote API: `listServers` returned
+all 4 servers with correct status/type/version; `getPublicIp` worked;
+leveling DB (add/rank/leaderboard/curve) exercised against a temp SQLite
+file. Discord gateway not exercised (needs a real bot token). Nothing
+committed.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.

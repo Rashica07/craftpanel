@@ -13,7 +13,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub const BACKUP_DIR: &str = "craftpanel-backups";
-const PRE_RESTORE_PREFIX: &str = ".craftpanel-pre-restore-";
+/// Also excluded here so a zip backup never accidentally swallows the
+/// hardlink-snapshot store (`snapshots.rs`) that lives alongside it.
+const SNAPSHOT_DIR: &str = "craftpanel-snapshots";
+pub(crate) const PRE_RESTORE_PREFIX: &str = ".craftpanel-pre-restore-";
 
 pub type Progress<'a> = dyn Fn(&str) + Send + Sync + 'a;
 
@@ -44,6 +47,8 @@ fn excluded(rel: &str) -> bool {
     let l = rel.to_ascii_lowercase();
     l == BACKUP_DIR
         || l.starts_with(&format!("{BACKUP_DIR}/"))
+        || l == SNAPSHOT_DIR
+        || l.starts_with(&format!("{SNAPSHOT_DIR}/"))
         || l.starts_with(PRE_RESTORE_PREFIX)
         || l == "logs"
         || l.starts_with("logs/")
@@ -275,7 +280,7 @@ pub fn restore(dir: &Path, id: &str, progress: &Progress<'_>) -> Result<(), Stri
     Ok(())
 }
 
-fn sanitize_id(id: &str) -> Result<String, String> {
+pub(crate) fn sanitize_id(id: &str) -> Result<String, String> {
     if id.is_empty()
         || !id
             .chars()

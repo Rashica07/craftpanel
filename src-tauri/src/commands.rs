@@ -22,6 +22,7 @@ use crate::pluginconfig;
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
 use crate::schedule::{self, Schedule};
+use crate::snapshots::{self, Snapshot};
 use crate::tunnel::{TunnelManager, TunnelStatus};
 use crate::worlds::{self, WorldInfo};
 use crate::external::{self, ExternalStatus};
@@ -1059,6 +1060,49 @@ pub fn get_backups_config(db: State<Db>) -> BackupsConfig {
 pub fn set_backups_keep(db: State<Db>, keep: u32) -> Result<(), String> {
     db.set_setting(BACKUPS_KEEP_KEY, &keep.min(1000).to_string())
         .map_err(|e| e.to_string())
+}
+
+// --- "Time Machine" snapshots ------------------------------------------------
+
+#[tauri::command]
+pub fn snapshot_now(db: State<Db>, id: String) -> Result<Snapshot, String> {
+    let rec = load(&db, &id)?;
+    let dir = std::path::Path::new(&rec.path);
+    let made = snapshots::snapshot_now(dir, "manual", &|_| {})?;
+    let sch = schedule::read(&db, &id);
+    snapshots::prune(dir, sch.snapshot_recent_hours(), sch.snapshot_daily_days());
+    Ok(made)
+}
+
+#[tauri::command]
+pub fn list_snapshots(db: State<Db>, id: String) -> Result<Vec<Snapshot>, String> {
+    let rec = load(&db, &id)?;
+    Ok(snapshots::list(std::path::Path::new(&rec.path)))
+}
+
+#[tauri::command]
+pub fn restore_snapshot(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+    snapshot_id: String,
+) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    if procs.is_running(&id) || external::probe(&rec.path).looks_running() {
+        return Err("Stop the server before restoring a snapshot.".into());
+    }
+    let dir = std::path::Path::new(&rec.path);
+    let sid = id.clone();
+    let app2 = app.clone();
+    let progress = move |msg: &str| emit_backup_progress(&app2, &sid, msg);
+    snapshots::restore(dir, &snapshot_id, &progress)
+}
+
+#[tauri::command]
+pub fn delete_snapshot(db: State<Db>, id: String, snapshot_id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    snapshots::delete(std::path::Path::new(&rec.path), &snapshot_id)
 }
 
 // --- files + logs ------------------------------------------------------------

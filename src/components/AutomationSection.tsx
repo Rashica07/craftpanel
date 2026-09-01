@@ -14,6 +14,9 @@ const EMPTY: Schedule = {
   backupOnStop: false,
   intervalBackupHours: null,
   cloudBackup: false,
+  snapshotIntervalMins: null,
+  snapshotKeepRecentHours: 24,
+  snapshotKeepDailyDays: 30,
 };
 
 export function AutomationSection({ serverId }: { serverId: string }) {
@@ -53,6 +56,9 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         scheduledStart: sch.scheduledStart?.trim() ? sch.scheduledStart.trim() : null,
         dailyRestart: sch.dailyRestart?.trim() ? sch.dailyRestart.trim() : null,
         timedCommands: sch.timedCommands.filter((c) => c.at.trim() && c.command.trim()),
+        snapshotIntervalMins: sch.snapshotIntervalMins && sch.snapshotIntervalMins > 0
+          ? Math.max(5, sch.snapshotIntervalMins)
+          : null,
       };
       await api.setSchedule(serverId, clean);
       setSch(clean);
@@ -162,6 +168,64 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         />
         <span className="text-2xs text-ink-faint">hours, while running</span>
       </label>
+
+      <div className="mt-3 border-t border-line-soft pt-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={sch.snapshotIntervalMins != null}
+            onChange={(e) => set("snapshotIntervalMins", e.target.checked ? 15 : null)}
+            className="accent-accent"
+          />
+          <span className="flex-1">Take Time Machine snapshots every</span>
+          <input
+            type="number"
+            min={5}
+            max={1440}
+            disabled={sch.snapshotIntervalMins == null}
+            value={sch.snapshotIntervalMins ?? 15}
+            onChange={(e) => set("snapshotIntervalMins", Math.max(5, Number(e.target.value) || 15))}
+            className="w-14 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink disabled:opacity-40"
+          />
+          <span className="text-2xs text-ink-faint">min, while running</span>
+        </label>
+        {sch.snapshotIntervalMins != null && (
+          <div className="mt-2 space-y-1.5 pl-6">
+            <p className="text-2xs leading-relaxed text-ink-faint">
+              Cheap, frequent rollback points — unchanged files are hard-linked, not
+              copied, so this costs almost nothing on disk. Browse and restore them
+              from the timeline in the Backups tab. Local only, separate from the zip
+              backups above.
+            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-ink-faint">
+              <span className="flex items-center gap-1.5">
+                Keep all from the last
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={sch.snapshotKeepRecentHours || 24}
+                  onChange={(e) => set("snapshotKeepRecentHours", Number(e.target.value) || 24)}
+                  className="w-12 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink"
+                />
+                hours
+              </span>
+              <span className="flex items-center gap-1.5">
+                then 1/day for
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={sch.snapshotKeepDailyDays || 30}
+                  onChange={(e) => set("snapshotKeepDailyDays", Number(e.target.value) || 30)}
+                  className="w-12 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink"
+                />
+                days
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
 
       <label className="mt-2.5 flex items-start gap-2 text-sm">
         <input
