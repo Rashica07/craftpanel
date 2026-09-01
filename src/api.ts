@@ -34,15 +34,19 @@ import type {
   ModrinthInstalled,
   ModrinthSearch,
   NewServer,
+  ConcurrentPoint,
   JoinInfo,
+  MetricPoint,
   PlayerAction,
   PlayerList,
   PlayerStat,
+  PluginConfigView,
   ProcSnapshot,
   ProvisionProgress,
   R2Config,
   R2Status,
   RconSettings,
+  RemoteApiStatus,
   RconSetupResult,
   Schedule,
   ServerRecord,
@@ -157,6 +161,17 @@ export const api = {
   createServer(spec: CreateSpec): Promise<ServerRecord> {
     return invoke("create_server", { spec });
   },
+  cloneServer(id: string, newName: string, newDir: string): Promise<ServerRecord> {
+    return invoke("clone_server", { id, newName, newDir });
+  },
+  changeServerVersion(
+    id: string,
+    loader: Loader,
+    mcVersion: string,
+    loaderVersion?: string,
+  ): Promise<ServerRecord> {
+    return invoke("change_server_version", { id, loader, mcVersion, loaderVersion: loaderVersion ?? null });
+  },
   onProvisionProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
     return listen<ProvisionProgress>("provision:progress", (e) => fn(e.payload));
   },
@@ -253,6 +268,11 @@ export const api = {
     if (!picked?.length) return null;
     return invoke("fs_import", { id, dir, sources: picked });
   },
+  /** Same command as fsImport, but for real filesystem paths handed over
+   * by an OS drag-and-drop instead of the file dialog — no dialog to skip. */
+  fsImportPaths(id: string, dir: string, paths: string[]): Promise<string[]> {
+    return invoke("fs_import", { id, dir, sources: paths });
+  },
   async fsExport(id: string, path: string): Promise<boolean> {
     const name = path.split("/").pop() || "download";
     const dest = await save({ defaultPath: name, title: "Save file as" });
@@ -268,6 +288,46 @@ export const api = {
   },
   playerHistory(id: string): Promise<PlayerStat[]> {
     return invoke("player_history", { id });
+  },
+  playerActivity(id: string, since: number, bucketSecs: number): Promise<ConcurrentPoint[]> {
+    return invoke("player_activity", { id, since, bucketSecs });
+  },
+  metricsHistory(id: string, since: number): Promise<MetricPoint[]> {
+    return invoke("metrics_history", { id, since });
+  },
+  pluginConfigViews(id: string): Promise<PluginConfigView[]> {
+    return invoke("plugin_config_views", { id });
+  },
+  setPluginConfig(id: string, plugin: string, key: string, value: string): Promise<void> {
+    return invoke("set_plugin_config", { id, plugin, key, value });
+  },
+
+  // App lock (local PIN)
+  lockStatus(): Promise<boolean> {
+    return invoke("lock_status");
+  },
+  lockSet(pin: string): Promise<void> {
+    return invoke("lock_set", { pin });
+  },
+  lockCheck(pin: string): Promise<boolean> {
+    return invoke("lock_check", { pin });
+  },
+  lockClear(currentPin: string): Promise<void> {
+    return invoke("lock_clear", { currentPin });
+  },
+
+  // Remote API (Android companion app)
+  remoteApiStatus(): Promise<RemoteApiStatus> {
+    return invoke("remote_api_status");
+  },
+  remoteApiSetEnabled(enabled: boolean): Promise<RemoteApiStatus> {
+    return invoke("remote_api_set_enabled", { enabled });
+  },
+  remoteApiRegenerateToken(): Promise<RemoteApiStatus> {
+    return invoke("remote_api_regenerate_token");
+  },
+  remoteApiPairPayload(): Promise<string> {
+    return invoke("remote_api_pair_payload");
   },
 
   // Stage 5 — networking / join address
@@ -344,9 +404,10 @@ export const api = {
     id: string,
     query: string,
     projectType: string,
+    category: string | null = null,
     offset = 0,
   ): Promise<ModrinthSearch> {
-    return invoke("modrinth_search", { id, query, projectType, offset });
+    return invoke("modrinth_search", { id, query, projectType, category, offset });
   },
   modrinthInstall(
     id: string,
@@ -397,6 +458,9 @@ export const api = {
   },
   installUpdate(): Promise<void> {
     return invoke("install_update");
+  },
+  discordTestWebhook(url: string): Promise<void> {
+    return invoke("discord_test_webhook", { url });
   },
   onUpdateProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
     return listen<ProvisionProgress>("update:progress", (e) => fn(e.payload));

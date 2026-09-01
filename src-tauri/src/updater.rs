@@ -26,6 +26,51 @@ pub struct UpdateCheck {
     pub unavailable: Option<String>,
 }
 
+/// CraftPanel's own repo — used whenever no valid override is configured,
+/// so update checks work out of the box instead of silently doing nothing
+/// until someone finds the "GitHub repo" field in Settings and fills it in.
+/// A fork can still point this at itself via that field.
+const DEFAULT_REPO: &str = "Rashica07/craftpanel";
+
+/// Turns whatever a human typed or pasted into "GitHub repo" — a bare
+/// `owner/repo`, a full `https://github.com/owner/repo` URL, one with a
+/// trailing `.git` or slash, or (the bug that prompted this) `owner/repo`
+/// with a stray `github.com/` still stuck on the front from a copy-paste —
+/// into a clean `owner/repo`, or `None` if it still doesn't look like one.
+fn normalize_repo(input: &str) -> Option<String> {
+    let mut s = input.trim();
+    for prefix in ["https://", "http://"] {
+        s = s.strip_prefix(prefix).unwrap_or(s);
+    }
+    s = s.strip_prefix("www.").unwrap_or(s);
+    // strip a leading "github.com/" — possibly more than once, matching
+    // the exact "github.com/github.com/owner/repo" shape this was seen to
+    // produce
+    loop {
+        let lower = s.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("github.com/") {
+            s = &s[s.len() - rest.len()..];
+        } else {
+            break;
+        }
+    }
+    let s = s.trim_matches('/').trim_end_matches(".git");
+    let parts: Vec<&str> = s.split('/').collect();
+    let [owner, repo] = parts.as_slice() else { return None };
+    let valid = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    if valid(owner) && valid(repo) {
+        Some(format!("{owner}/{repo}"))
+    } else {
+        None
+    }
+}
+
+/// What to actually check/install against: a valid configured override, or
+/// CraftPanel's own repo as a fallback — never "nothing configured".
+fn resolve_repo(repo: Option<&str>) -> String {
+    repo.and_then(normalize_repo).unwrap_or_else(|| DEFAULT_REPO.to_string())
+}
+
 fn parse_semver(s: &str) -> (u64, u64, u64) {
     let s = s.trim().trim_start_matches('v');
     let mut it = s.split(['.', '-', '+']).filter_map(|p| p.parse::<u64>().ok());
@@ -38,19 +83,7 @@ fn parse_semver(s: &str) -> (u64, u64, u64) {
 
 pub fn check(repo: Option<&str>) -> UpdateCheck {
     let current = env!("CARGO_PKG_VERSION").to_string();
-    let repo = match repo.map(str::trim).filter(|s| s.contains('/')) {
-        Some(r) => r,
-        None => {
-            return UpdateCheck {
-                current,
-                latest: None,
-                newer: false,
-                url: None,
-                notes: None,
-                unavailable: Some("Set your GitHub repo in Settings to check for updates.".into()),
-            }
-        }
-    };
+    let repo = resolve_repo(repo);
 
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let resp = ureq::get(&url)
@@ -92,10 +125,7 @@ pub fn check(repo: Option<&str>) -> UpdateCheck {
 /// process plugin's `relaunch()` — this function doesn't restart the app
 /// itself, since a command that never returns is awkward to await from JS.
 pub async fn install(app: &AppHandle, repo: Option<&str>) -> Result<(), String> {
-    let repo = repo
-        .map(str::trim)
-        .filter(|s| s.contains('/'))
-        .ok_or_else(|| "Set your GitHub repo in Settings to update.".to_string())?;
+    let repo = resolve_repo(repo);
 
     let endpoint = format!("https://github.com/{repo}/releases/latest/download/latest.json")
         .parse()
@@ -173,9 +203,74 @@ mod tests {
     }
 
     #[test]
-    fn no_repo_is_graceful() {
+    fn no_repo_configured_falls_back_to_craftpanels_own() {
+        assert_eq!(resolve_repo(None), DEFAULT_REPO);
+        assert_eq!(resolve_repo(Some("")), DEFAULT_REPO);
+        assert_eq!(resolve_repo(Some("   ")), DEFAULT_REPO);
+    }
+
+    #[test]
+    fn normalize_accepts_a_bare_owner_slash_repo() {
+        assert_eq!(normalize_repo("someone/fork").as_deref(), Some("someone/fork"));
+    }
+
+    #[test]
+    fn normalize_strips_scheme_and_host() {
+        assert_eq!(
+            normalize_repo("https://github.com/someone/fork").as_deref(),
+            Some("someone/fork")
+        );
+        assert_eq!(
+            normalize_repo("http://www.github.com/someone/fork").as_deref(),
+            Some("someone/fork")
+        );
+    }
+
+    #[test]
+    fn normalize_strips_trailing_dot_git_and_slash() {
+        assert_eq!(normalize_repo("someone/fork.git").as_deref(), Some("someone/fork"));
+        assert_eq!(normalize_repo("someone/fork/").as_deref(), Some("someone/fork"));
+        assert_eq!(
+            normalize_repo("https://github.com/someone/fork/").as_deref(),
+            Some("someone/fork")
+        );
+    }
+
+    #[test]
+    fn normalize_fixes_the_doubled_github_com_paste_bug() {
+        // exactly the shape a copy-paste from a browser address bar into a
+        // field that already expects "owner/repo" produced in practice
+        assert_eq!(
+            normalize_repo("github.com/Rashica07/craftpanel").as_deref(),
+            Some("Rashica07/craftpanel")
+        );
+        assert_eq!(
+            normalize_repo("github.com/github.com/Rashica07/craftpanel").as_deref(),
+            Some("Rashica07/craftpanel")
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_garbage() {
+        assert_eq!(normalize_repo(""), None);
+        assert_eq!(normalize_repo("not-a-repo-slug"), None);
+        assert_eq!(normalize_repo("a/b/c"), None);
+        assert_eq!(normalize_repo("has a space/repo"), None);
+    }
+
+    #[test]
+    fn resolve_falls_back_when_the_configured_value_is_unusable() {
+        // an empty override, or one that fails to normalize, must not leave
+        // the updater silently doing nothing — it should use CraftPanel's
+        // own repo, same as no override at all
+        assert_eq!(resolve_repo(Some("not a repo")), DEFAULT_REPO);
+        assert_eq!(resolve_repo(Some("someone/fork")), "someone/fork");
+    }
+
+    #[test]
+    #[ignore] // hits the network — run explicitly with `cargo test -- --ignored`
+    fn live_check_against_craftpanels_own_repo_is_reachable() {
         let c = check(None);
-        assert!(c.unavailable.is_some());
-        assert!(!c.newer);
+        assert!(c.unavailable.is_none(), "expected a real response: {:?}", c.unavailable);
     }
 }

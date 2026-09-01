@@ -19,6 +19,25 @@ pub struct CrashReport {
     pub headline: Option<String>,
     /// best guess at the offending mod / package
     pub suspect: Option<String>,
+    /// a named, missing hard dependency — when we can say exactly what's
+    /// missing, not just which mod noticed
+    pub missing_dependency: Option<MissingDependency>,
+}
+
+/// A missing hard dependency, e.g. "biomesoplenty needs terrablender".
+/// Parsed only from Forge/NeoForge's classic, long-stable crash-report
+/// block:
+/// `Mod ID: 'terrablender', Requested by: 'biomesoplenty', Expected range: '[3.0,)', Actual version: '[MISSING]'`
+/// Deliberately not guessing at other wordings — Forge/NeoForge have
+/// changed this text across versions, and a wrong guess here is worse than
+/// no suggestion at all.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingDependency {
+    /// the missing mod's id, e.g. "terrablender" — what to search Modrinth for
+    pub mod_id: String,
+    /// the mod that needs it, e.g. "biomesoplenty"
+    pub requested_by: String,
 }
 
 const VANILLA_ROOTS: &[&str] = &[
@@ -91,7 +110,28 @@ fn parse(file: &str, mtime: i64, text: &str) -> CrashReport {
         description,
         headline,
         suspect,
+        missing_dependency: missing_dependency(text),
     }
+}
+
+/// Parses `Mod ID: '<id>', Requested by: '<other id>', ... Actual version: '[MISSING]'`.
+/// One line, three quoted fields in a fixed order — real Forge/NeoForge
+/// output, not invented.
+fn missing_dependency(text: &str) -> Option<MissingDependency> {
+    for line in text.lines() {
+        let t = line.trim();
+        let Some(rest) = t.strip_prefix("Mod ID: '") else { continue };
+        let Some((mod_id, rest)) = rest.split_once('\'') else { continue };
+        let Some(rest) = rest.strip_prefix(", Requested by: '") else { continue };
+        let Some((requested_by, rest)) = rest.split_once('\'') else { continue };
+        if rest.contains("Actual version: '[MISSING]'") {
+            return Some(MissingDependency {
+                mod_id: mod_id.to_string(),
+                requested_by: requested_by.to_string(),
+            });
+        }
+    }
+    None
 }
 
 fn suspect_from_stack(text: &str) -> Option<String> {
@@ -172,6 +212,28 @@ java.lang.NullPointerException: Cannot invoke "..." because "x" is null
         let s = SAMPLE.replace(" ~[coolmod-1.2.3.jar:?]", "");
         let r = parse("c.txt", 0, &s);
         assert_eq!(r.suspect.as_deref(), Some("com.example"));
+    }
+
+    #[test]
+    fn names_a_missing_forge_dependency() {
+        let s = r#"---- Minecraft Crash Report ----
+
+Description: Loading crashed!
+
+net.minecraftforge.fml.LoadingFailedException: Loading errors encountered:
+Missing or unsupported mandatory dependencies:
+	Mod ID: 'terrablender', Requested by: 'biomesoplenty', Expected range: '[3.0,)', Actual version: '[MISSING]'
+"#;
+        let r = parse("crash.txt", 0, s);
+        let dep = r.missing_dependency.expect("should find the missing dep");
+        assert_eq!(dep.mod_id, "terrablender");
+        assert_eq!(dep.requested_by, "biomesoplenty");
+    }
+
+    #[test]
+    fn no_missing_dependency_line_is_none() {
+        let r = parse("crash.txt", 0, SAMPLE);
+        assert!(r.missing_dependency.is_none());
     }
 
     #[test]

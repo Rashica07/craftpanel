@@ -41,6 +41,37 @@ impl EventSink for TauriSink {
     fn status(&self, snap: &ProcSnapshot) {
         use tauri::Emitter;
         let _ = self.0.emit("server:status", snap);
+        self.notify_discord(snap);
+    }
+}
+
+impl TauriSink {
+    /// Only the transitions someone actually wants a ping for — not
+    /// `Starting`/`Stopping`, which are noisy and always immediately
+    /// followed by one of these.
+    fn notify_discord(&self, snap: &ProcSnapshot) {
+        use tauri::Manager;
+        let Some(db) = self.0.try_state::<crate::db::Db>() else { return };
+        let url = crate::commands::read_app_settings(&db).discord_webhook_url;
+        let url = url.trim();
+        if url.is_empty() {
+            return;
+        }
+        let message = match snap.status {
+            ServerStatus::Running => None, // covered by the frontend/user starting it themselves — Crashed/Stopped are the ones worth a ping away from the app
+            ServerStatus::Crashed => Some("🔴 crashed"),
+            ServerStatus::Stopped if !snap.stop_requested => Some("🟠 stopped unexpectedly"),
+            ServerStatus::Stopped => Some("⚪ stopped"),
+            _ => None,
+        };
+        let Some(message) = message else { return };
+        let name = db
+            .get_server(&snap.server_id)
+            .ok()
+            .flatten()
+            .map(|r| r.name)
+            .unwrap_or_else(|| snap.server_id.clone());
+        crate::discord::notify(url, format!("**{name}** {message}"));
     }
 }
 
@@ -380,6 +411,21 @@ impl ProcessManager {
             let rt = map.get_mut(&rec.id).unwrap();
             rt.child = Some(child.clone());
             rt.stdin = Some(stdin.clone());
+            // Real bug, found live: if this server was ever reattached
+            // (`adopt()`) before — even a launch or two ago — `adopted_pid`
+            // stuck around in this same Runtime entry forever, since
+            // nothing ever cleared it. `stop()`/`kill()` check
+            // `adopted_pid` *first*, so every future stop on this server
+            // kept targeting that old, long-dead pid over RCON instead of
+            // the real child process this exact call just spawned — the
+            // real JVM never got a correct kill signal at all, and (worse)
+            // if the OS ever recycled that old pid onto some unrelated
+            // `java` process, the watchdog's `server_alive()` check could
+            // even look like it was still "gracefully" waiting on it.
+            // From here on this Runtime genuinely owns a fresh child
+            // process — that's the only truth `stop`/`kill` should use.
+            rt.adopted_pid = None;
+            rt.rcon = None;
         }
 
         spawn_reader(self.sink.clone(), shared.clone(), stdout, "stdout", rec.server_type);
@@ -469,6 +515,18 @@ impl ProcessManager {
                 }
                 shared2.push(&sink, "system", "Graceful stop timed out — killing process.".into());
                 crate::session::force_kill(pid);
+                // Never trail off silently: confirm the kill actually took,
+                // and say so either way — a `kill -9` that doesn't land
+                // (wrong pid, already gone, permissions) used to leave
+                // status stuck on "Stopping" forever with no further word.
+                thread::sleep(Duration::from_millis(800));
+                if crate::session::server_alive(pid) {
+                    shared2.push(
+                        &sink,
+                        "system",
+                        format!("pid {pid} is still around after a force-kill — it may need a manual kill."),
+                    );
+                }
             });
             return Ok(());
         }
@@ -492,7 +550,9 @@ impl ProcessManager {
                     }
                 }
                 shared.push(&sink, "system", "Graceful stop timed out — killing process.".into());
-                let _ = child.lock().unwrap().kill();
+                if let Err(e) = child.lock().unwrap().kill() {
+                    shared.push(&sink, "system", format!("Force-kill failed: {e}"));
+                }
             });
         }
         Ok(())
@@ -1123,6 +1183,78 @@ mod tests {
         assert!(seen.contains(&ServerStatus::Running));
         assert!(seen.contains(&ServerStatus::Stopping));
         assert!(seen.contains(&ServerStatus::Stopped));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Real bug, found live: a server that had *ever* been reattached
+    /// (`adopt()`) — even one launch ago — kept a stale `adopted_pid`
+    /// around forever, since nothing cleared it. That meant a later
+    /// `stop()`, even on a genuinely fresh `start()`, still targeted the
+    /// old dead pid over RCON instead of the real child process — the real
+    /// JVM never received a correct kill signal and could hang stuck in
+    /// "Stopping" indefinitely (this exact chain got a user's real server
+    /// stuck for 38 minutes). Reproduces the adopt-then-restart sequence
+    /// and asserts the *second* stop actually reaches the real child.
+    #[test]
+    #[cfg(unix)]
+    fn stopping_after_a_restart_does_not_target_the_old_adopted_pid() {
+        let d = std::env::temp_dir().join("cp-stale-adopt");
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("server.jar"), b"").unwrap();
+
+        let mut r = rec(&d, ServerType::Vanilla, "server.jar");
+        r.id = "restart-me".into();
+        r.java_path = fake_java(&d, false);
+
+        let sink = Arc::new(CollectSink::default());
+        let pm = ProcessManager::with_sink(sink.clone());
+
+        // a long-lived process standing in for "some server CraftPanel
+        // reattached to at boot" — never told to stop itself, so the only
+        // way it dies is a real kill signal landing on the right pid.
+        let stray = Command::new("sh")
+            .arg("-c")
+            .arg("while true; do sleep 1; done")
+            .spawn()
+            .unwrap();
+        let stray_pid = stray.id();
+        pm.adopt(
+            &r,
+            crate::session::Session {
+                pid: stray_pid,
+                launcher_pid: std::process::id(),
+                started_at: now_secs(),
+                rcon_port: None,
+                rcon_password: None,
+            },
+        );
+        wait_until("adopted as running", || pm.snapshot("restart-me").status == ServerStatus::Running);
+
+        // it exits (killed directly, standing in for "died on its own") —
+        // the adopted-monitor notices and marks it Stopped, same as a real
+        // crash/manual-kill would.
+        crate::session::force_kill(stray_pid);
+        wait_until("adopted exit noticed", || pm.snapshot("restart-me").status == ServerStatus::Stopped);
+
+        // now a genuinely fresh start — this must fully take over as the
+        // real owner of this server id, stale adoption metadata and all.
+        pm.start(&r).unwrap();
+        wait_until("running again", || pm.snapshot("restart-me").status == ServerStatus::Running);
+
+        pm.stop("restart-me").unwrap();
+        wait_until("stopped again", || pm.snapshot("restart-me").status == ServerStatus::Stopped);
+        // exit_code 0 only happens if the real fake-java process received
+        // its "stop" line and exited cleanly on its own terms — the
+        // pre-fix bug would leave this Stopping forever (or, if it ever
+        // did resolve, only via the 25s force-kill timeout, never a clean
+        // exit) because the real child never got the command at all.
+        assert_eq!(pm.snapshot("restart-me").exit_code, Some(0));
+        assert!(
+            !sink.logs.lock().unwrap().iter().any(|l| l.text.contains("over RCON")),
+            "the second stop must never take the stale-adoption RCON path",
+        );
+
         let _ = fs::remove_dir_all(&d);
     }
 

@@ -15,9 +15,10 @@ use crate::backups::{self, Backup};
 use crate::branding;
 use crate::crashreports::{self, CrashReport};
 use crate::crossplay::{self, CrossplayStatus};
-use crate::db::{Db, NewServer, ServerRecord};
+use crate::db::{self, Db, NewServer, ServerRecord};
 use crate::modrinth::{self, InstallResult, InstalledEntry, SearchResult};
 use crate::perf::{self, PerfSample};
+use crate::pluginconfig;
 use crate::files::{self, FileView, Listing};
 use crate::net::{self, NetInfo};
 use crate::schedule::{self, Schedule};
@@ -423,7 +424,7 @@ pub struct PlayerList {
     pub players: Vec<String>,
 }
 
-fn rcon_endpoint(rec: &ServerRecord) -> Result<(u16, String), String> {
+pub(crate) fn rcon_endpoint(rec: &ServerRecord) -> Result<(u16, String), String> {
     let props = Properties::load(std::path::Path::new(&rec.path));
     if !props.existed() {
         return Err("This server has no server.properties yet — start it once first.".into());
@@ -450,7 +451,7 @@ fn rcon_run(pool: &RconPool, rec: &ServerRecord, cmd: &str) -> Result<String, St
 }
 
 /// Run a closure (possibly several commands) through the pooled connection.
-fn rcon_with<T>(
+pub(crate) fn rcon_with<T>(
     pool: &RconPool,
     rec: &ServerRecord,
     f: impl Fn(&mut RconClient) -> rcon::Result<T>,
@@ -706,6 +707,96 @@ pub fn create_server(
     let _ = procs.snapshot(&rec.id);
     let _ = app.emit("provision:done", &rec);
     Ok(rec)
+}
+
+/// Swaps an existing server's loader/version in place — world, plugins/
+/// mods, and configs are untouched (see `provision::change_version`).
+/// Vanilla/Paper/Fabric only for now; a real backup is taken first no
+/// matter what, since this is real surgery on a server someone already
+/// has running worlds in.
+#[tauri::command]
+pub fn change_server_version(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+    loader: String,
+    mc_version: String,
+    loader_version: Option<String>,
+) -> Result<ServerRecord, String> {
+    let rec = load(&db, &id)?;
+    if procs.is_running(&id) {
+        return Err("Stop the server first — this replaces its jar file.".into());
+    }
+    let loader = parse_loader(&loader)?;
+
+    let dir = std::path::Path::new(&rec.path);
+    backups::backup_now(dir, Some("before version/loader change"), "manual", &|_| {})
+        .map_err(|e| format!("Backup failed, stopping before touching anything: {e}"))?;
+
+    let app2 = app.clone();
+    let created = provision::change_version(&rec, loader, mc_version, loader_version, &move |p| {
+        let _ = app2.emit("provision:progress", &p);
+    })?;
+
+    db.update_server_version(&id, created.server_type, &created.mc_version, &created.launch_target)
+        .map_err(|e| e.to_string())?;
+
+    load(&db, &id)
+}
+
+/// Copies a server's world/plugins/mods/configs into a brand-new folder and
+/// registers it as its own independent server — same jar/version/loader,
+/// a fresh port so it can run alongside the original, no shared state
+/// (session lock, cloud-sync code, backup history — see `clone.rs`).
+#[tauri::command]
+pub fn clone_server(
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+    new_name: String,
+    new_dir: String,
+) -> Result<ServerRecord, String> {
+    let rec = load(&db, &id)?;
+    if procs.is_running(&id) {
+        return Err("Stop the server first — cloning while it's writing to its own files isn't safe.".into());
+    }
+    let name = new_name.trim();
+    if name.is_empty() {
+        return Err("Give the clone a name.".into());
+    }
+
+    crate::clone::clone_dir(std::path::Path::new(&rec.path), std::path::Path::new(&new_dir))?;
+
+    // fresh port so the clone can run at the same time as the original —
+    // same line-preserving Properties path `create_server` uses.
+    let dir = std::path::Path::new(&new_dir);
+    let mut props = Properties::load(dir);
+    if props.existed() {
+        if let Some(port) = pick_free_port(&db) {
+            props.set("server-port", &port.to_string());
+            if rec.server_type != ServerType::Bedrock {
+                props.set("query.port", &port.to_string());
+                props.set("rcon.port", &(port + 10).to_string());
+            }
+        }
+        props.save().map_err(|e| e.to_string())?;
+    }
+
+    let cloned = db
+        .insert_server(NewServer {
+            name: name.to_string(),
+            path: new_dir.clone(),
+            server_type: rec.server_type,
+            launch_target: rec.launch_target.clone(),
+            mc_version: rec.mc_version.clone(),
+            java_path: rec.java_path.clone(),
+            ram_mb: rec.ram_mb,
+        })
+        .map_err(|e| e.to_string())?;
+
+    crate::attribution::stamp(&db, &cloned.path, "cloned");
+    Ok(cloned)
 }
 
 // --- modpacks ---------------------------------------------------------------
@@ -1057,6 +1148,73 @@ pub fn player_history(
     Ok(analytics::player_history(&rec.path, online))
 }
 
+/// Concurrent-player-count time series — "peak hours", from the same log
+/// data `player_history` already parses. `since`/`bucket_secs` in seconds;
+/// the frontend passes e.g. 24h/3600s, 7d/21600s (6h), 30d/86400s (1d).
+#[tauri::command]
+pub fn player_activity(
+    db: State<Db>,
+    procs: State<ProcessManager>,
+    id: String,
+    since: i64,
+    bucket_secs: i64,
+) -> Result<Vec<analytics::ConcurrentPoint>, String> {
+    let rec = load(&db, &id)?;
+    let online = procs.is_running(&id) || external::probe(&rec.path).looks_running();
+    Ok(analytics::concurrent_series(&rec.path, online, since, bucket_secs))
+}
+
+/// RAM/CPU/TPS history from the background sampler (`metrics_history.rs`)
+/// — one row roughly every 60s while the server was running.
+#[tauri::command]
+pub fn metrics_history(db: State<Db>, id: String, since: i64) -> Result<Vec<db::MetricPoint>, String> {
+    let _ = load(&db, &id)?;
+    db.metric_history(&id, since).map_err(|e| e.to_string())
+}
+
+/// Every known plugin (EssentialsX/LuckPerms/Geyser) actually installed on
+/// this server, with its current values for the handful of settings
+/// CraftPanel offers a visual editor for.
+#[tauri::command]
+pub fn plugin_config_views(db: State<Db>, id: String) -> Result<Vec<pluginconfig::PluginConfigView>, String> {
+    let rec = load(&db, &id)?;
+    Ok(pluginconfig::detect(&rec.path))
+}
+
+// --- local app lock (PIN) --------------------------------------------------
+
+#[tauri::command]
+pub fn lock_status(lock: State<crate::lock::Lock>) -> bool {
+    lock.is_set()
+}
+
+#[tauri::command]
+pub fn lock_set(lock: State<crate::lock::Lock>, pin: String) -> Result<(), String> {
+    lock.set(&pin)
+}
+
+#[tauri::command]
+pub fn lock_check(lock: State<crate::lock::Lock>, pin: String) -> bool {
+    lock.check(&pin)
+}
+
+#[tauri::command]
+pub fn lock_clear(lock: State<crate::lock::Lock>, current_pin: String) -> Result<(), String> {
+    lock.clear(&current_pin)
+}
+
+#[tauri::command]
+pub fn set_plugin_config(
+    db: State<Db>,
+    id: String,
+    plugin: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    pluginconfig::set_field(&rec.path, &plugin, &key, &value)
+}
+
 // --- branding + worlds -------------------------------------------------------
 
 #[tauri::command]
@@ -1161,7 +1319,7 @@ pub fn net_info(
     id: String,
 ) -> Result<JoinInfo, String> {
     let rec = load(&db, &id)?;
-    let net = net::info(&rec.path);
+    let net = net::info(&rec.path, rec.server_type.is_bedrock());
     // a running in-app tunnel wins; else the user's saved permanent address
     let live_tunnel = tunnel.status(&id).address;
     let tunnel_address = live_tunnel.clone().or_else(|| {
@@ -1217,13 +1375,13 @@ pub fn set_tunnel_address(db: State<Db>, id: String, address: Option<String>) ->
 #[tauri::command]
 pub fn upnp_forward(db: State<Db>, id: String) -> Result<String, String> {
     let rec = load(&db, &id)?;
-    net::upnp_forward(&rec.path)
+    net::upnp_forward(&rec.path, rec.server_type.is_bedrock())
 }
 
 #[tauri::command]
 pub fn upnp_remove(db: State<Db>, id: String) -> Result<(), String> {
     let rec = load(&db, &id)?;
-    net::upnp_remove(&rec.path)
+    net::upnp_remove(&rec.path, rec.server_type.is_bedrock())
 }
 
 #[tauri::command]
@@ -1349,6 +1507,7 @@ pub fn modrinth_search(
     id: String,
     query: String,
     project_type: String,
+    category: Option<String>,
     offset: Option<u32>,
 ) -> Result<SearchResult, String> {
     let rec = load(&db, &id)?;
@@ -1357,6 +1516,7 @@ pub fn modrinth_search(
         rec.server_type,
         &query,
         &project_type,
+        category.as_deref(),
         rec.mc_version.as_deref(),
         offset.unwrap_or(0),
     )
@@ -1466,6 +1626,15 @@ pub struct AppSettings {
     pub keep_servers_on_quit: bool,
     #[serde(default)]
     pub github_repo: String,
+    /// Discord webhook URL — server start/stop/crash and scheduled-backup
+    /// notifications post here. Blank = notifications off.
+    #[serde(default)]
+    pub discord_webhook_url: String,
+    /// Keeps the Mac from sleeping while it's on AC power (battery still
+    /// sleeps normally) — what makes a per-server scheduled start able to
+    /// actually fire instead of sitting there asleep at the target time.
+    #[serde(default)]
+    pub stay_awake_on_power: bool,
 }
 
 const APP_SETTINGS_KEY: &str = "app.settings";
@@ -1484,9 +1653,23 @@ pub fn app_settings_get(db: State<Db>) -> AppSettings {
 }
 
 #[tauri::command]
-pub fn app_settings_set(db: State<Db>, settings: AppSettings) -> Result<(), String> {
+pub fn app_settings_set(
+    power: State<crate::power::PowerKeeper>,
+    db: State<Db>,
+    settings: AppSettings,
+) -> Result<(), String> {
+    power.set_enabled(settings.stay_awake_on_power)?;
     let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
     db.set_setting(APP_SETTINGS_KEY, &json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn discord_test_webhook(url: String) -> Result<(), String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("Paste a webhook URL first.".to_string());
+    }
+    crate::discord::post(url, "👋 CraftPanel is wired up — you'll hear from this channel when a server crashes, stops on its own, or a scheduled backup fails.")
 }
 
 #[tauri::command]

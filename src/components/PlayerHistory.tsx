@@ -1,8 +1,66 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PlayerStat } from "../types";
-import { Badge, Card, IconButton, StateBlock } from "./ui";
+import { HISTORY_RANGES, rangeFor, type HistoryRange } from "../data/historyRanges";
+import { Badge, Card, IconButton, Segmented, StateBlock } from "./ui";
+import { AreaChart } from "./AreaChart";
 import { ErrorBanner } from "./ErrorBanner";
+
+/**
+ * Concurrent-player-count over time — "when are my peak hours" — built from
+ * the same join/leave log data `PlayerHistory` below already parses, just
+ * aggregated differently (overlap count, not per-player totals).
+ */
+export function PlayerActivityChart({ serverId }: { serverId: string }) {
+  const [range, setRange] = useState<HistoryRange>("24h");
+  const [points, setPoints] = useState<{ ts: number; value: number | null }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    const r = rangeFor(range);
+    const since = Math.floor(Date.now() / 1000) - r.spanSecs;
+    api
+      .playerActivity(serverId, since, r.bucketSecs)
+      .then((rows) => {
+        setPoints(rows.map((p) => ({ ts: p.ts, value: p.count })));
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  }, [serverId, range]);
+
+  useEffect(() => {
+    setPoints(null);
+    load();
+  }, [load]);
+
+  return (
+    <Card
+      title="Player activity"
+      icon="activity"
+      description="How many were on at once — spot your peak hours."
+      right={
+        <Segmented
+          size="sm"
+          value={range}
+          onChange={setRange}
+          options={HISTORY_RANGES.map((r) => ({ value: r.value, label: r.label }))}
+        />
+      }
+    >
+      {error ? (
+        <ErrorBanner message={error} onRetry={load} />
+      ) : !points ? (
+        <StateBlock state="loading" title="Reading logs…" compact />
+      ) : (
+        <AreaChart
+          data={points}
+          color="var(--color-accent)"
+          formatValue={(v) => `${Math.round(v)} player${Math.round(v) === 1 ? "" : "s"}`}
+        />
+      )}
+    </Card>
+  );
+}
 
 function dur(secs: number) {
   const h = Math.floor(secs / 3600);

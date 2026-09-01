@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   IconButton,
+  Pill,
   Segmented,
   StateBlock,
   TextInput,
@@ -43,6 +44,28 @@ function enforcesClientModsFor(t: ServerType): boolean {
   return t === "fabric" || t === "forge";
 }
 
+/**
+ * Real Modrinth categories, not invented ones (confirmed live against
+ * `/v2/tag/category`) — shared taxonomy across mods, plugins, datapacks.
+ * "Minigame" is the one that actually matters here: it's what separates a
+ * complete gamemode someone can drop in and play (BedWars, a skyblock
+ * plugin) from an everyday utility plugin like EssentialsX or WorldEdit.
+ * There's no Modrinth equivalent of a modpack for plugins — no bundled
+ * "plugin pack" format exists — so this filter is the real substitute:
+ * point straight at the complete-gamemode plugins instead of hoping the
+ * right one turns up in a text search.
+ */
+const CATEGORIES: { id: string; label: string }[] = [
+  { id: "minigame", label: "Minigame" },
+  { id: "economy", label: "Economy" },
+  { id: "management", label: "Management" },
+  { id: "utility", label: "Utility" },
+  { id: "social", label: "Social" },
+  { id: "game-mechanics", label: "Mechanics" },
+  { id: "worldgen", label: "World gen" },
+  { id: "adventure", label: "Adventure" },
+];
+
 function typesFor(t: ServerType): { id: string; label: string }[] {
   if (t === "vanilla") return [{ id: "datapack", label: "Datapacks" }];
   const primary =
@@ -60,14 +83,19 @@ export function BrowsePanel({
   serverId,
   serverType,
   onNeedsRestart,
+  initialQuery,
 }: {
   serverId: string;
   serverType: ServerType;
   onNeedsRestart: () => void;
+  /** jump straight to a search — e.g. the crash banner's "find the missing
+   * dependency" action. Only applied once, on mount. */
+  initialQuery?: string;
 }) {
   const tabs = typesFor(serverType);
   const [ptype, setPtype] = useState(tabs[0].id);
-  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [res, setRes] = useState<ModrinthSearch | null>(null);
   const [installed, setInstalled] = useState<ModrinthInstalled[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -80,25 +108,35 @@ export function BrowsePanel({
 
   useEffect(() => {
     setRes(null);
-    setQuery("");
+    setQuery(initialQuery ?? "");
+    setCategory(null);
     setError(null);
     setNote(null);
     loadInstalled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialQuery
+    // is deliberately a one-time seed on mount/server-switch, not a value
+    // to keep resyncing on every render
   }, [serverId, loadInstalled]);
+
+  // switching tabs (Mods <-> Datapacks, or between servers) clears a
+  // category filter that may not even apply to the new tab
+  useEffect(() => {
+    setCategory(null);
+  }, [ptype]);
 
   const doSearch = useCallback(async () => {
     setError(null);
     try {
-      setRes(await api.modrinthSearch(serverId, query, ptype));
+      setRes(await api.modrinthSearch(serverId, query, ptype, category));
     } catch (e) {
       setError(String(e));
     }
-  }, [serverId, query, ptype]);
+  }, [serverId, query, ptype, category]);
 
   useEffect(() => {
     const t = setTimeout(doSearch, query ? 350 : 0);
     return () => clearTimeout(t);
-  }, [doSearch, query, ptype]);
+  }, [doSearch, query, ptype, category]);
 
   async function install(projectId: string, title: string) {
     setBusy(projectId);
@@ -162,6 +200,23 @@ export function BrowsePanel({
         </Button>
       </div>
 
+      {ptype !== "datapack" && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <Pill active={category === null} onClick={() => setCategory(null)}>
+            All
+          </Pill>
+          {CATEGORIES.map((c) => (
+            <Pill
+              key={c.id}
+              active={category === c.id}
+              onClick={() => setCategory((cur) => (cur === c.id ? null : c.id))}
+            >
+              {c.label}
+            </Pill>
+          ))}
+        </div>
+      )}
+
       {note && (
         <Banner tone="ok" className="mb-2" onDismiss={() => setNote(null)}>
           {note}
@@ -182,8 +237,12 @@ export function BrowsePanel({
           <StateBlock
             state="empty"
             icon="search"
-            title={`Nothing called “${query}”`}
-            message="Try a shorter search, or switch between mods and plugins above."
+            title={query.trim() ? `Nothing called "${query}"` : "Nothing in this category"}
+            message={
+              category
+                ? `No results with the "${CATEGORIES.find((c) => c.id === category)?.label}" filter on. Try "All", or a different search.`
+                : "Try a shorter search, or switch between mods and plugins above."
+            }
             compact
           />
         ) : (

@@ -3,6 +3,8 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/schemas/
+mobile/src-tauri/target/
+mobile/src-tauri/gen/android/app/src/main/jniLibs/
 
 # os / editor
 .DS_Store

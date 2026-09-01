@@ -223,7 +223,7 @@ export function HealthStrip({
         unit={
           s.tps != null
             ? s.mspt != null
-              ? `tps · ${s.mspt.toFixed(0)}ms`
+              ? `tps · ${s.mspt.toFixed(1)}ms`
               : "tps"
             : undefined
         }

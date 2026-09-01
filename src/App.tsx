@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { AddServerModal } from "./components/AddServerModal";
 import { CreateServerModal } from "./components/CreateServerModal";
+import { TemplateModal } from "./components/TemplateModal";
 import { JoinSharedModal } from "./components/JoinSharedModal";
 import { SettingsPage } from "./components/SettingsPage";
+import { LockScreen } from "./components/LockScreen";
 import { ServerDetail } from "./components/ServerDetail";
+import { Dashboard } from "./components/Dashboard";
 import {
   SERVER_TYPE_META,
   STATUS_META,
@@ -17,6 +20,7 @@ import {
   Button,
   Skeleton,
   StatusDot,
+  toast,
   Toaster,
   Tooltip,
   cx,
@@ -120,14 +124,22 @@ function NewServerButton({
   onCreate,
   onAdd,
   onJoin,
+  onQuickStart,
 }: {
   onCreate: () => void;
   onAdd: () => void;
   onJoin: () => void;
+  onQuickStart: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const items = [
+    {
+      icon: "sparkle",
+      label: "Quick start",
+      hint: "Skyblock, Bedwars, or Survival — one click",
+      run: onQuickStart,
+    },
     {
       icon: "folder-open",
       label: "Add an existing folder",
@@ -337,10 +349,17 @@ function Welcome({
 /* ───────────────────────────── the app ────────────────────────────── */
 
 export default function App() {
+  // undefined = still checking; null = no PIN set, straight through
+  const [locked, setLocked] = useState<boolean | undefined>(undefined);
   const [servers, setServers] = useState<ServerRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showQuickStart, setShowQuickStart] = useState(false);
+  // Land on the overview by default once there's more than one server to
+  // survey — with just one, jumping straight to it (the old behavior) is
+  // still the faster path and there's nothing an overview would add.
+  const [showDashboard, setShowDashboard] = useState(true);
   const [showJoin, setShowJoin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -367,6 +386,13 @@ export default function App() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    api
+      .lockStatus()
+      .then(setLocked)
+      .catch(() => setLocked(false));
   }, []);
 
   // Sidebar player counts. Only polls servers that are actually up, slowly —
@@ -419,6 +445,17 @@ export default function App() {
     (s) => statusOf(runtimes, s.id) === "running",
   ).length;
 
+  if (locked === undefined) {
+    return (
+      <div className="flex h-full items-center justify-center bg-surface">
+        <LogoMark size={40} />
+      </div>
+    );
+  }
+  if (locked) {
+    return <LockScreen onUnlocked={() => setLocked(false)} />;
+  }
+
   return (
     <div className="flex h-full">
       {/* ───────────────────────── sidebar ───────────────────────── */}
@@ -442,8 +479,30 @@ export default function App() {
             onCreate={() => setShowCreate(true)}
             onAdd={() => setShowAdd(true)}
             onJoin={() => setShowJoin(true)}
+            onQuickStart={() => setShowQuickStart(true)}
           />
         </div>
+
+        {servers.length > 1 && (
+          <div className="px-3 pb-3">
+            <button
+              onClick={() => {
+                setShowSettings(false);
+                setShowDashboard(true);
+              }}
+              aria-current={showDashboard && !showSettings ? "true" : undefined}
+              className={cx(
+                "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium transition-colors duration-[120ms]",
+                showDashboard && !showSettings
+                  ? "bg-surface-3 text-ink"
+                  : "text-ink-dim hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              <Icon name="monitor" size={15} />
+              Overview
+            </button>
+          </div>
+        )}
 
         <div className="px-4 pb-1.5">
           <span className="font-display text-2xs font-semibold uppercase tracking-[0.08em] text-ink-ghost">
@@ -479,10 +538,11 @@ export default function App() {
                 key={s.id}
                 server={s}
                 status={statusOf(runtimes, s.id)}
-                selected={!showSettings && s.id === selectedId}
+                selected={!showSettings && !showDashboard && s.id === selectedId}
                 players={players[s.id] ?? null}
                 onSelect={() => {
                   setShowSettings(false);
+                  setShowDashboard(false);
                   setSelectedId(s.id);
                 }}
               />
@@ -528,6 +588,29 @@ export default function App() {
           </div>
         ) : showSettings ? (
           <SettingsPage onClose={() => setShowSettings(false)} />
+        ) : showDashboard && servers.length > 1 ? (
+          <Dashboard
+            servers={servers}
+            runtimes={runtimes}
+            onOpen={(id) => {
+              setShowDashboard(false);
+              setSelectedId(id);
+            }}
+            onStart={async (id) => {
+              try {
+                await api.startServer(id);
+              } catch (e) {
+                toast.bad("Couldn't start it", String(e));
+              }
+            }}
+            onStop={async (id) => {
+              try {
+                await api.stopServer(id);
+              } catch (e) {
+                toast.bad("Couldn't stop it", String(e));
+              }
+            }}
+          />
         ) : selected ? (
           <ServerDetail
             key={selected.id}
@@ -569,6 +652,16 @@ export default function App() {
           onClose={() => setShowJoin(false)}
           onJoined={async (rec) => {
             setShowJoin(false);
+            await refresh();
+            setSelectedId(rec.id);
+          }}
+        />
+      )}
+      {showQuickStart && (
+        <TemplateModal
+          onClose={() => setShowQuickStart(false)}
+          onCreated={async (rec) => {
+            setShowQuickStart(false);
             await refresh();
             setSelectedId(rec.id);
           }}

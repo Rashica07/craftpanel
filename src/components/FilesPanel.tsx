@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { api } from "../api";
 import type { FileEntry, FileView, Listing } from "../types";
+import { highlightLine, langForFile } from "../data/highlightConfig";
 import {
   Badge,
   Banner,
@@ -16,6 +18,81 @@ import {
 } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
+
+/**
+ * A textarea with a real syntax-highlighted backdrop underneath it —
+ * the standard trick (transparent text over a colored `<pre>`, kept in
+ * scroll-sync) rather than pulling in a full editor library for a handful
+ * of config files. Falls back to a plain textarea for anything that isn't
+ * YAML/JSON/properties/TOML, since there's nothing useful to highlight.
+ */
+function HighlightedEditor({
+  value,
+  onChange,
+  rel,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rel: string;
+  disabled?: boolean;
+}) {
+  const lang = langForFile(rel);
+  const preRef = useRef<HTMLPreElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const sync = () => {
+    if (preRef.current && taRef.current) {
+      preRef.current.scrollTop = taRef.current.scrollTop;
+      preRef.current.scrollLeft = taRef.current.scrollLeft;
+    }
+  };
+
+  if (lang === "plain") {
+    return (
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        disabled={disabled}
+        className="min-h-0 flex-1 resize-none rounded-md border border-line bg-surface-2 p-2.5 font-mono text-xs text-ink outline-none transition-colors focus:border-accent"
+      />
+    );
+  }
+
+  const lines = value.split("\n");
+
+  return (
+    <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-surface-2 transition-colors focus-within:border-accent">
+      <pre
+        ref={preRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre p-2.5 font-mono text-xs leading-[1.5]"
+      >
+        {lines.map((line, i) => (
+          <div key={i}>
+            {highlightLine(line, lang).map((tok, j) => (
+              <span key={j} className={tok.cls ?? "text-ink"}>
+                {tok.text}
+              </span>
+            ))}
+            {line === "" ? "​" : null}
+          </div>
+        ))}
+      </pre>
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={sync}
+        spellCheck={false}
+        disabled={disabled}
+        wrap="off"
+        className="absolute inset-0 resize-none overflow-auto whitespace-pre bg-transparent p-2.5 font-mono text-xs leading-[1.5] text-transparent caret-ink outline-none"
+      />
+    </div>
+  );
+}
 
 function size(n: number) {
   if (n >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(2)} GB`;
@@ -39,6 +116,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
   const [renaming, setRenaming] = useState<FileEntry | null>(null);
   const [renameTo, setRenameTo] = useState("");
   const [deleting, setDeleting] = useState<FileEntry | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -59,6 +137,34 @@ export function FilesPanel({ serverId }: { serverId: string }) {
     setDir("");
     setOpen(null);
   }, [serverId]);
+
+  // Real OS drag-and-drop — Tauri hands over actual filesystem paths (not
+  // browser File/Blob objects), so this reuses the exact same fs_import
+  // command the "Add files" dialog already calls, just skipping the dialog.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "over") {
+          setDragOver(true);
+        } else if (event.payload.type === "drop") {
+          setDragOver(false);
+          const paths = event.payload.paths;
+          if (paths?.length) {
+            guard(async () => {
+              const added = await api.fsImportPaths(serverId, dir, paths);
+              toast.ok(`Added ${added.length} file(s)`, added.join(", "));
+            });
+          }
+        } else {
+          setDragOver(false);
+        }
+      })
+      .then((f) => (unlisten = f))
+      .catch(() => {});
+    return () => unlisten?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, dir]);
 
   async function guard(fn: () => Promise<unknown>, msg?: string) {
     setBusy(true);
@@ -134,11 +240,11 @@ export function FilesPanel({ serverId }: { serverId: string }) {
                 disabled for this file.
               </Banner>
             )}
-            <textarea
+            <HighlightedEditor
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
-              className="min-h-0 flex-1 resize-none rounded-md border border-line bg-surface-2 p-2.5 font-mono text-xs text-ink outline-none transition-colors focus:border-accent"
+              onChange={setDraft}
+              rel={open.rel}
+              disabled={open.truncated}
             />
             <div className="mt-2 flex items-center gap-2">
               <Button
@@ -225,7 +331,18 @@ export function FilesPanel({ serverId }: { serverId: string }) {
       )}
       <ErrorBanner message={error} onDismiss={() => setError(null)} className="mb-2" />
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line-soft bg-surface shadow-e1">
+      <div
+        className={cx(
+          "relative min-h-0 flex-1 overflow-y-auto rounded-lg border shadow-e1 transition-colors",
+          dragOver ? "border-accent bg-accent-muted/40" : "border-line-soft bg-surface",
+        )}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-surface/90 text-sm font-medium text-accent">
+            <Icon name="upload" size={16} />
+            Drop to add to {dir || "the server folder"}
+          </div>
+        )}
         {!listing ? (
           <StateBlock state="loading" title="Reading the folder…" compact />
         ) : listing.entries.length === 0 ? (
@@ -233,7 +350,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
             state="empty"
             icon="folder-open"
             title="Nothing in here"
-            message="Use “Add files” to drop something in."
+            message="Use “Add files”, or drag files in from Finder/Explorer."
             compact
           />
         ) : (

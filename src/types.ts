@@ -208,9 +208,42 @@ export interface TimedCommand {
   command: string;
 }
 
+export interface ConcurrentPoint {
+  ts: number;
+  count: number;
+}
+
+export interface MetricPoint {
+  ts: number;
+  ramMb: number | null;
+  cpuPct: number | null;
+  tps: number | null;
+}
+
+export type PluginFieldKind = "bool" | "int" | "text" | "select";
+
+export interface PluginConfigField {
+  key: string;
+  label: string;
+  hint: string;
+  kind: PluginFieldKind;
+  options: string[];
+  min: number | null;
+  max: number | null;
+  value: string | null;
+}
+
+export interface PluginConfigView {
+  plugin: string;
+  name: string;
+  file: string;
+  fields: PluginConfigField[];
+}
+
 export interface Schedule {
   restartOnCrash: boolean;
   maxCrashRestarts: number;
+  scheduledStart: string | null;
   dailyRestart: string | null;
   restartWarningSecs: number;
   timedCommands: TimedCommand[];
@@ -287,6 +320,8 @@ export interface AppSettings {
   expertMode: boolean;
   keepServersOnQuit: boolean;
   githubRepo: string;
+  discordWebhookUrl: string;
+  stayAwakeOnPower: boolean;
 }
 
 export interface UpdateCheck {
@@ -335,6 +370,7 @@ export interface CrashReport {
   description: string | null;
   headline: string | null;
   suspect: string | null;
+  missingDependency: { modId: string; requestedBy: string } | null;
 }
 
 export interface JvmInfo {
@@ -368,6 +404,13 @@ export interface JoinInfo {
   likelyCgnat: boolean;
   tunnelAddress: string | null;
   recommended: string | null;
+}
+
+export interface RemoteApiStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  token: string;
 }
 
 export interface ProvisionProgress {

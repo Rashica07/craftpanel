@@ -198,15 +198,37 @@ pub fn search(
     server_type: ServerType,
     query: &str,
     project_type: &str,
+    category: Option<&str>,
     mc_version: Option<&str>,
     offset: u32,
 ) -> Result<SearchResult, String> {
     let lf = loader_facet(server_type);
-    let mut facets: Vec<String> = vec![format!("[\"project_type:{project_type}\"]")];
+    // Modrinth's *search index* files real Paper/Spigot plugins under a
+    // separate "plugin" project_type facet — distinct from "mod" even
+    // though the hit objects it returns still report `project_type: "mod"`
+    // either way (confusing, but confirmed live: searching "mod" +
+    // categories:paper for "bedwars" or "skyblock" returns zero hits on
+    // Modrinth's real API, while "plugin" finds the real ones). Only the
+    // *search* facet needs this translation — `best_version`/`install`
+    // filter by loader alone and never see this string.
+    let search_project_type = if project_type == "mod"
+        && matches!(server_type, ServerType::Paper | ServerType::Spigot)
+    {
+        "plugin"
+    } else {
+        project_type
+    };
+    let mut facets: Vec<String> = vec![format!("[\"project_type:{search_project_type}\"]")];
     if project_type != "datapack" {
         facets.push(format!("[\"categories:{lf}\"]"));
         // server-usable only — drop client-only mods (minimaps, Iris, …)
         facets.push("[\"server_side:required\",\"server_side:optional\"]".to_string());
+    }
+    // an extra, ANDed-in requirement — e.g. "minigame" to separate a
+    // complete gamemode (BedWars, a skyblock plugin) from an everyday
+    // utility plugin, instead of one undifferentiated pile of hits.
+    if let Some(c) = category.filter(|c| !c.is_empty()) {
+        facets.push(format!("[\"categories:{c}\"]"));
     }
     // NB: no `versions:` facet — we show everything and *mark* what has no build
     // for this server's MC version, so nothing silently disappears.
@@ -512,7 +534,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_search_fabric() {
-        let r = search("/tmp", ServerType::Fabric, "lithium", "mod", Some("1.21.1"), 0).unwrap();
+        let r = search("/tmp", ServerType::Fabric, "lithium", "mod", None, Some("1.21.1"), 0).unwrap();
         assert!(r.hits.iter().any(|h| h.slug == "lithium"));
     }
 
@@ -520,17 +542,36 @@ mod tests {
     #[ignore]
     fn live_search_excludes_client_only_and_marks_old() {
         // Sodium is client-only -> must NOT appear in a server search
-        let r = search("/tmp", ServerType::Fabric, "sodium", "mod", Some("1.21.1"), 0).unwrap();
+        let r = search("/tmp", ServerType::Fabric, "sodium", "mod", None, Some("1.21.1"), 0).unwrap();
         assert!(!r.hits.iter().any(|h| h.slug == "sodium"), "sodium is client-only");
         for h in &r.hits {
             assert_ne!(h.server_side, "unsupported");
         }
         // a very old MC version -> current mods have no build, must be marked
-        let old = search("/tmp", ServerType::Fabric, "lithium", "mod", Some("1.7.10"), 0).unwrap();
+        let old = search("/tmp", ServerType::Fabric, "lithium", "mod", None, Some("1.7.10"), 0).unwrap();
         if let Some(l) = old.hits.iter().find(|h| h.slug == "lithium") {
             assert!(!l.compatible, "lithium has no 1.7.10 build");
         }
         println!("{} hits, {} incompatible", r.hits.len(), r.hits.iter().filter(|h| !h.compatible).count());
+    }
+
+    // hits the network — regression test for the "Paper Plugins search
+    // returns nothing real" bug: Modrinth indexes plugins under its own
+    // "plugin" project_type facet, not "mod", even for a Paper server.
+    #[test]
+    #[ignore]
+    fn live_search_paper_finds_real_plugins() {
+        let bedwars = search("/tmp", ServerType::Paper, "bedwars", "mod", Some("minigame"), None, 0).unwrap();
+        assert!(
+            bedwars.hits.iter().any(|h| h.slug.contains("bedwars")),
+            "expected a real BedWars plugin in Paper plugin search, got: {:?}",
+            bedwars.hits.iter().map(|h| &h.slug).collect::<Vec<_>>()
+        );
+        let skyblock = search("/tmp", ServerType::Paper, "skyblock", "mod", None, None, 0).unwrap();
+        assert!(
+            !skyblock.hits.is_empty(),
+            "expected real Skyblock plugins in Paper plugin search, got none"
+        );
     }
 
     #[test]
@@ -540,7 +581,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         // Roughly Enough Items needs cloth-config + architectury -> exercises dep resolution
-        let hit = search(&d.to_string_lossy(), ServerType::Fabric, "roughly enough items", "mod", Some("1.21.1"), 0)
+        let hit = search(&d.to_string_lossy(), ServerType::Fabric, "roughly enough items", "mod", None, Some("1.21.1"), 0)
             .unwrap()
             .hits
             .into_iter()

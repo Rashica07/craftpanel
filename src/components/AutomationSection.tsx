@@ -7,6 +7,7 @@ import { ErrorBanner } from "./ErrorBanner";
 const EMPTY: Schedule = {
   restartOnCrash: false,
   maxCrashRestarts: 3,
+  scheduledStart: null,
   dailyRestart: null,
   restartWarningSecs: 60,
   timedCommands: [],
@@ -49,6 +50,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
     try {
       const clean: Schedule = {
         ...sch,
+        scheduledStart: sch.scheduledStart?.trim() ? sch.scheduledStart.trim() : null,
         dailyRestart: sch.dailyRestart?.trim() ? sch.dailyRestart.trim() : null,
         timedCommands: sch.timedCommands.filter((c) => c.at.trim() && c.command.trim()),
       };
@@ -93,6 +95,23 @@ export function AutomationSection({ serverId }: { serverId: string }) {
           </span>
         </span>
       </label>
+
+      <label className="mt-2.5 flex items-center gap-2 text-sm">
+        <span className="flex-1">Start every day at</span>
+        <input
+          type="time"
+          value={sch.scheduledStart ?? ""}
+          onChange={(e) => set("scheduledStart", e.target.value || null)}
+          className="rounded border border-line bg-surface-2 px-2 py-1 text-sm text-ink"
+        />
+      </label>
+      {sch.scheduledStart && (
+        <p className="mt-0.5 text-2xs text-ink-faint">
+          Only fires if it's stopped. Local time — needs the Mac to actually be awake at that
+          time; turn on "Stay awake on power" in Settings → General so it doesn't sleep through
+          it.
+        </p>
+      )}
 
       <label className="mt-2.5 flex items-center gap-2 text-sm">
         <span className="flex-1">Restart every day at</span>

@@ -220,6 +220,103 @@ pub fn player_history(server_dir: &str, server_online: bool) -> Vec<PlayerStat> 
     out
 }
 
+/// One time bucket's concurrent-player count — for a "peak hours" chart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConcurrentPoint {
+    /// bucket start, unix epoch
+    pub ts: i64,
+    pub count: u32,
+}
+
+/// Bucketed concurrent-player counts from `since` to now. Reuses the exact
+/// same log sources and join/leave parsing as `player_history` — just
+/// aggregated as open intervals instead of per-player totals, since the
+/// underlying data (Minecraft's own rotated logs) is identical either way.
+pub fn concurrent_series(
+    server_dir: &str,
+    server_online: bool,
+    since: i64,
+    bucket_secs: i64,
+) -> Vec<ConcurrentPoint> {
+    if bucket_secs <= 0 {
+        return Vec::new();
+    }
+    // Coarsen automatically rather than trust the caller's bucket size —
+    // `since = 0` with a small bucket would otherwise mean iterating
+    // millions of empty buckets between the Unix epoch and now.
+    let end = now();
+    let bucket_secs = {
+        let span = (end - since).max(bucket_secs);
+        const MAX_BUCKETS: i64 = 3000;
+        if span / bucket_secs > MAX_BUCKETS { span / MAX_BUCKETS + 1 } else { bucket_secs }
+    };
+    let logs = Path::new(server_dir).join("logs");
+    let mut open: HashMap<String, i64> = HashMap::new();
+    let mut intervals: Vec<(i64, i64)> = Vec::new();
+    let mut last_line_ts = 0i64;
+
+    for src in collect_sources(&logs) {
+        let Some(text) = read_text(&src) else { continue };
+        let mut day = 0i64;
+        let mut prev_secs = -1i64;
+        for line in text.lines() {
+            let Some(secs) = hms(line) else { continue };
+            if prev_secs >= 0 && secs + 3600 < prev_secs {
+                day += 1;
+            }
+            prev_secs = secs;
+            let ts = src.base_epoch + day * 86400 + secs;
+            last_line_ts = last_line_ts.max(ts);
+            let Some(rest) = line.split("]: ").nth(1) else { continue };
+            if let Some(name) = rest.strip_suffix(" joined the game") {
+                if valid_name(name) {
+                    open.insert(name.to_string(), ts);
+                }
+            } else if let Some(name) = rest.strip_suffix(" left the game") {
+                if valid_name(name) {
+                    if let Some(joined) = open.remove(name) {
+                        intervals.push((joined, ts));
+                    }
+                }
+            }
+        }
+    }
+    // Sessions still "open" (no "left the game" line) at the end of the
+    // logs: if the server's actually running right now, they're genuinely
+    // still online — count them through `now`. Otherwise this is almost
+    // certainly an ungraceful shutdown; count them only through the last
+    // timestamp actually seen in the logs, same as `player_history` does.
+    let tail = if server_online { end } else { last_line_ts };
+    for (_, joined) in open {
+        intervals.push((joined, tail.max(joined)));
+    }
+
+    bucketize(&intervals, since, end, bucket_secs)
+}
+
+/// The pure part of `concurrent_series`: how many `[join, leave)` intervals
+/// overlap each bucket from `start` (rounded down to a bucket boundary) to
+/// `end`. Split out specifically so this can be tested with plain
+/// synthetic epoch numbers — no wall clock, no log parsing, so it can't be
+/// flaky around a UTC day boundary the way anchoring a test to a fixed
+/// clock-time log line would be.
+fn bucketize(intervals: &[(i64, i64)], since: i64, end: i64, bucket_secs: i64) -> Vec<ConcurrentPoint> {
+    let start = (since / bucket_secs) * bucket_secs;
+    let mut out = Vec::new();
+    let mut t = start;
+    while t <= end {
+        let bucket_end = t + bucket_secs;
+        let count = intervals
+            .iter()
+            .filter(|(j, l)| *j < bucket_end && *l > t)
+            .count() as u32;
+        out.push(ConcurrentPoint { ts: t, count });
+        t = bucket_end;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +401,68 @@ mod tests {
         }
         assert!(!h.is_empty());
         assert!(h.iter().all(|p| p.first_seen > 0 && p.last_seen >= p.first_seen));
+    }
+
+    #[test]
+    fn bucketize_counts_overlapping_intervals() {
+        // Alice [0,3600), Bob [1800,10800), Charlie [8100,9900) — plain
+        // synthetic epoch seconds, no wall clock involved, so this can't be
+        // flaky around a UTC day boundary the way anchoring to a fixed
+        // clock-time log line would be.
+        let intervals = vec![(0i64, 3600i64), (1800, 10800), (8100, 9900)];
+        let points = bucketize(&intervals, 0, 10800, 3600);
+        assert_eq!(points.len(), 4, "buckets at 0, 3600, 7200, 10800");
+        assert_eq!(points[0].count, 2, "[0,3600): Alice + Bob overlap");
+        assert_eq!(points[1].count, 1, "[3600,7200): only Bob");
+        assert_eq!(points[2].count, 2, "[7200,10800): Bob + Charlie overlap");
+        assert_eq!(points[3].count, 0, "[10800,14400): Bob's leave at exactly 10800 doesn't count as still online");
+    }
+
+    #[test]
+    fn concurrent_series_counts_overlap() {
+        // Log lines use clock-times computed from *now*, a few seconds in
+        // the past — not a fixed string like "01:00:00" — specifically so
+        // this test can't fail depending on what time of day it happens to
+        // run (a fixed clock-time is only "a few hours ago" most of the
+        // time; near a UTC day boundary it can read as hours in the future
+        // instead, which is exactly what broke the first version of this
+        // test). Real log parsing end to end; `bucketize` above already
+        // covers the actual overlap-counting math with zero clock
+        // dependency, so this only needs to confirm the two paths connect.
+        fn clock(secs_ago: i64) -> String {
+            let s = (now() - secs_ago).rem_euclid(86400);
+            format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+        }
+        let log = format!(
+            "[{}] [Server thread/INFO]: Alice joined the game\n\
+             [{}] [Server thread/INFO]: Bob joined the game\n\
+             [{}] [Server thread/INFO]: Alice left the game\n\
+             [{}] [Server thread/INFO]: Bob left the game\n",
+            clock(20),
+            clock(15),
+            clock(10),
+            clock(5),
+        );
+        let d = write_srv("concurrent", &log);
+        let since = now() - 3600;
+        let points = concurrent_series(&d.to_string_lossy(), false, since, 3600);
+        assert!(!points.is_empty());
+        assert!(
+            points.iter().any(|p| p.count >= 2),
+            "Alice + Bob's overlapping sessions should show up somewhere: {points:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn concurrent_series_never_returns_absurd_bucket_counts() {
+        // since = the Unix epoch, bucket_secs = 1s — without the auto-
+        // coarsening safeguard this would try to allocate ~1.7 billion
+        // buckets between 1970 and now.
+        let d = write_srv("safety", "");
+        let points = concurrent_series(&d.to_string_lossy(), false, 0, 1);
+        assert!(points.len() <= 3001, "got {} buckets, safeguard should cap this", points.len());
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

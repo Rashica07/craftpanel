@@ -4,7 +4,7 @@
 //! whichever the server understands: `/tick query` (vanilla 1.21+),
 //! `/tps` (Paper/Purpur/Spigot), `/spark tps`, `/forge tps`.
 
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -26,11 +26,35 @@ pub struct PerfSample {
     pub source: Option<String>,
 }
 
+/// One `System` shared across every call, for the lifetime of the app.
+///
+/// A single `System::new()` per call (as this used to do, sleeping ~220ms
+/// between two refreshes inside the same call) reliably reported CPU as a
+/// flat 0% on macOS — confirmed by reading sysinfo 0.32's actual macOS
+/// source: a process's `old_stime`/`old_utime` (its previous CPU-time
+/// baseline) start at 0 when the process is first seen by a `System`, and
+/// only get seeded with a real value the *next* time it's refreshed —
+/// meaning `compute_cpu_usage`'s "do we have a real baseline yet?" check
+/// still fails on that second call, and a fresh `System` per call means
+/// every single call *is* that process's first and second appearance.
+/// Real percentages only ever showed up on a third refresh in testing.
+///
+/// Keeping one `System` alive across calls fixes this properly instead of
+/// papering over it with a third in-call sleep: whatever pid a caller asks
+/// about builds up a real baseline across normal poll cycles (this is
+/// already polled every few seconds by the frontend), and each call here
+/// does one refresh with no blocking sleep at all. The trade a caller makes
+/// is that the very first read of a pid this app has never sampled before
+/// legitimately comes back as 0% — expected sysinfo behavior, not a bug,
+/// and it self-corrects on the next poll a few seconds later.
+fn shared_system() -> &'static Mutex<System> {
+    static SYS: OnceLock<Mutex<System>> = OnceLock::new();
+    SYS.get_or_init(|| Mutex::new(System::new()))
+}
+
 pub fn process_sample(pid: u32) -> (Option<u32>, Option<f32>) {
-    let mut sys = System::new();
     let p = Pid::from_u32(pid);
-    sys.refresh_processes(ProcessesToUpdate::Some(&[p]), true);
-    std::thread::sleep(Duration::from_millis(220));
+    let mut sys = shared_system().lock().unwrap_or_else(|e| e.into_inner());
     sys.refresh_processes(ProcessesToUpdate::Some(&[p]), true);
     match sys.process(p) {
         Some(proc) => (
@@ -120,6 +144,7 @@ fn strip_color(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn parses_vanilla_tick_output() {
@@ -146,5 +171,43 @@ mod tests {
     fn own_process_reports_memory() {
         let (ram, _cpu) = process_sample(std::process::id());
         assert!(ram.map(|m| m > 0).unwrap_or(false));
+    }
+
+    /// The real macOS bug this session found and fixed: a process this
+    /// app has never sampled before legitimately reads 0% CPU on its
+    /// *first* sample (sysinfo has no prior baseline for it yet) — but a
+    /// second sample, once it's had real CPU time to measure a delta
+    /// against, must show a real, nonzero value for a genuinely busy
+    /// process. The old implementation (`System::new()` + two refreshes
+    /// inside one call) failed this — it needed a third refresh before
+    /// ever showing anything but 0, confirmed by reading sysinfo's own
+    /// macOS source. `process_sample` now shares one `System` across
+    /// calls specifically so the *second* real call already works.
+    #[test]
+    fn second_sample_of_a_busy_process_is_nonzero() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop2 = stop.clone();
+        let handle = std::thread::spawn(move || {
+            let mut x: u64 = 0;
+            while !stop2.load(std::sync::atomic::Ordering::Relaxed) {
+                x = x.wrapping_add(1).wrapping_mul(3);
+            }
+            x
+        });
+
+        let pid = std::process::id();
+        let (_, first) = process_sample(pid); // cold start — allowed to be 0
+        std::thread::sleep(Duration::from_millis(250));
+        let (_, second) = process_sample(pid);
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = handle.join();
+
+        let _ = first;
+        assert!(
+            second.unwrap_or(0.0) > 1.0,
+            "expected real cpu usage on the second sample of a busy process, got {:?}",
+            second
+        );
     }
 }

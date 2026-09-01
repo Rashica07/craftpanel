@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { CrossplayStatus, JoinInfo, TunnelStatus } from "../types";
+import type { CrossplayStatus, JoinInfo, ServerType, TunnelStatus } from "../types";
 import {
   Badge,
   Banner,
@@ -64,7 +64,14 @@ function ReachRow({
   );
 }
 
-export function NetworkPanel({ serverId }: { serverId: string }) {
+export function NetworkPanel({
+  serverId,
+  serverType,
+}: {
+  serverId: string;
+  serverType?: ServerType;
+}) {
+  const protocol = serverType === "bedrock" ? "UDP" : "TCP";
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [tunnel, setTunnel] = useState("");
@@ -493,7 +500,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
                   </Tooltip>
                 ) : info.upnpMapped ? (
                   <Badge tone="ok" icon="check">
-                    Port {info.port} forwarded
+                    Port {info.port} ({protocol}) forwarded
                   </Badge>
                 ) : info.upnpAvailable ? (
                   <Badge tone="neutral" icon="router">
@@ -517,9 +524,9 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
                   Open the port automatically
                 </h4>
                 <p className="mt-1 text-2xs leading-relaxed text-ink-faint">
-                  Asks your router (over UPnP) to forward port {info.port} to
-                  this computer for 24 hours. No tunnel, no middleman — but it
-                  exposes your home IP.
+                  Asks your router (over UPnP) to forward port {info.port}
+                  {" "}({protocol}) to this computer for 24 hours. No tunnel,
+                  no middleman — but it exposes your home IP.
                 </p>
                 <div className="mt-2.5">
                   {!info.upnpMapped ? (
@@ -531,7 +538,7 @@ export function NetworkPanel({ serverId }: { serverId: string }) {
                         guard(() => api.upnpForward(serverId), "Port forwarded.")
                       }
                     >
-                      Forward port {info.port}
+                      Forward port {info.port} ({protocol})
                     </Button>
                   ) : (
                     <Button

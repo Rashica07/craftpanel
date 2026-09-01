@@ -922,10 +922,14 @@ Settings → Updates has a real "Install & restart" button with progress.
   `tauri-plugin-updater` v2.10.1 / `tauri-plugin-process` v2.3.1 APIs —
   108 passed, 0 failed, real exit code 0 (checked directly, not piped).
 - `tsc --noEmit` and `vite build`: both clean.
-- **Not yet live-tested end to end** — unlike Bedrock/modpacks, this one
-  genuinely can't be: it needs a real signed, *published* release to update
-  to, which needs the CI secrets set first (they aren't yet — see chat).
-  The first real tag pushed after those secrets exist is the real test.
+- **Update: the signing pipeline is now live-verified.** v2.1.0 was the
+  first real tag pushed after the CI secrets were set — `gh release view
+  v2.1.0` shows real `.sig` files next to every artifact and a real
+  `latest.json`, so CI genuinely signed with the new key end to end, not
+  just "didn't error." What's still unverified is the *install* half: an
+  actual running CraftPanel checking, downloading, and installing an
+  update via `updater::install()` — that needs a second release to update
+  *to*, which doesn't exist yet.
 
 ## Batch 20 — Settings promoted to a full page (2026-08-30)
 
@@ -1030,6 +1034,614 @@ windows, and linux via a live (keyless) API check before shipping this —
 same download/verify/extract code path already covered by the Batch 15
 live end-to-end test, just parameterized differently, so no new live test
 was needed to trust it. `cargo test`: 112 passed, 0 failed, real exit 0.
+
+## Release 2.1.0 (2026-08-30)
+
+Bundled Batches 13–21 plus the Java 25 bugfix — the first commit and push
+of this whole engagement (everything above had been sitting as uncommitted
+working-tree changes). `main` pushed, then `v2.1.0` tagged and pushed,
+triggering `release.yml` for real for the first time since the signing
+secrets were added.
+
+- Built the macOS x64 DMG locally first (`tauri build --target
+  x86_64-apple-darwin`, unsigned, ~14.5 min release compile) specifically
+  to catch any release-profile-only issue *before* spending a CI run and a
+  public tag on it. Clean build, `hdiutil verify` passed.
+- CI (`gh run list` → success) produced the full signed set: macOS
+  aarch64 + x64 `.dmg`, Windows `.exe` (NSIS) + `.msi`, `.app.tar.gz`
+  updater bundles for both Mac arches, a `.sig` next to every updater
+  artifact, and `latest.json` — confirms the Batch 19 signing pipeline
+  really works, not just that it didn't error locally.
+- Release is still a **draft** on GitHub, same as always — nothing ships
+  to real users' auto-updaters until it's published by hand.
+- Handed the user the local unsigned macOS DMG immediately (didn't need to
+  wait on CI), then the four signed CI artifacts once the run finished.
+
+## Bugfix — UPnP port-forward used TCP even for Bedrock (2026-08-30)
+
+User-reported: the "Forward port" button in a server's Network tab wasn't
+doing anything useful, on the actual port CraftPanel shows as `25566`+.
+Root cause found in `net.rs`: `upnp_forward`/`upnp_remove`/`has_mapping`
+were all hardcoded to `PortMappingProtocol::TCP`, unconditionally — correct
+for every Java-based server, but Bedrock speaks RakNet over **UDP only**.
+For a standalone Bedrock server (Batch 17), the button was asking the
+router to forward a TCP port nothing was listening on, while the real UDP
+port stayed unforwarded — and the "already forwarded" check made the same
+TCP-only mistake, so it could never even detect a correct mapping.
+
+Fixed: `net.rs` now takes `bedrock: bool` through `info`/`upnp_forward`/
+`upnp_remove`, resolved via a single `protocol_for()` (UDP for Bedrock, TCP
+otherwise) — pulled from `rec.server_type.is_bedrock()` in `commands.rs`,
+so the fix is server-type-aware end to end, not just for the one report.
+`NetworkPanel.tsx` now also says which protocol it's forwarding ("Forward
+port 25566 (UDP)") instead of leaving it silent, so this doesn't stay a
+silent trap for the next Bedrock user. New unit test
+`bedrock_forwards_udp_everyone_else_forwards_tcp`. `cargo test`: 113
+passed, 0 failed, real exit 0. `tsc --noEmit` and `vite build`: both clean.
+
+## Bugfix — Paper "Plugins" search found nothing real (2026-08-30)
+
+Surfaced while answering "how do I make a real skyblock/bedwars server":
+the Add-ons → Plugins tab for a Paper/Spigot server was searching Modrinth
+with `project_type:mod` + `categories:paper` — which returns **zero real
+hits** for "bedwars" or "skyblock" (confirmed live against Modrinth's own
+API before touching code, same discipline as the Java 25 fix). Modrinth's
+*search index* files real plugins under a separate `project_type:plugin`
+facet — confusingly, the hit objects it returns still self-report
+`"project_type": "mod"` either way, which is presumably why this slipped
+through: reading a returned hit's own field would never have caught it,
+only actually querying the search endpoint would.
+
+Fixed in `modrinth::search()`: translate `project_type == "mod"` to
+`"plugin"` for the facet, but only when `server_type` is Paper or Spigot —
+`best_version`/`install`/`check_updates` are untouched, since they filter
+by loader alone and never send `project_type` to Modrinth at all, so the
+install/update path was never actually broken, only discovery was.
+
+**Verified live**, not just compiled: new `#[ignore]`d test
+`live_search_paper_finds_real_plugins` asserts a real BedWars plugin comes
+back for "bedwars" and a non-empty result for "skyblock" — run against the
+real Modrinth API, passed. Full `modrinth::tests` module re-run with
+`--include-ignored`: 7 passed, 0 failed. Full `cargo test`: 113 passed, 0
+failed, real exit 0. `tsc --noEmit`: clean.
+
+**The actual answer to "how do I make one":** create a **Paper** server
+(not Vanilla/Fabric/Forge — skyblock/bedwars server *software* is plugin-
+based, not modded), then its Add-ons tab → Plugins, search "bedwars" or
+"skyblock", install one-click. That part (loader pick → mod jar → correct
+folder) was already one-click and correct; only the *search* was silently
+returning nothing. Plugin *configuration* after install (arenas, islands,
+economy, etc.) is genuinely plugin-specific and out of scope for
+CraftPanel to automate — no one-click for that part exists for any panel.
+
+## Add-ons category filter — "complete gamemode" vs "everyday plugin" (2026-08-30)
+
+Direct follow-up: the user wanted to distinguish "complete plugins/plugin
+packs" (a full BedWars or skyblock setup) from "normal plugins"
+(EssentialsX, WorldEdit) in the Add-ons browser. There's no Modrinth
+equivalent of a modpack for plugins — no bundled "plugin pack" format
+exists (confirmed against `/v2/tag/category` and `/v2/tag/project_type`
+before building anything, not assumed) — so the real substitute is
+category filtering: Modrinth already tags exactly this distinction via a
+`minigame` category, shared across its mod/plugin/datapack taxonomy.
+
+**What shipped:** `modrinth::search()` takes an optional `category`,
+ANDed onto the existing project_type/loader facets. `BrowsePanel.tsx` gets
+a row of `Pill` toggles (All, Minigame, Economy, Management, Utility,
+Social, Mechanics, World gen, Adventure — real category slugs, not
+invented ones) above the results, for both the Mods and Plugins tabs
+(hidden for Datapacks, where this taxonomy doesn't apply the same way).
+"Minigame" is the one that actually answers the original ask — filtering
+Paper's Plugins tab to it surfaces BedWars1058, BentoBox (a real skyblock
+framework), OneBlock, LifeWars and similar, sorted by downloads, instead
+of hoping the right thing turns up in a text search.
+
+**Verified live** before writing UI: `categories:minigame` combined with
+the existing `project_type:plugin` + `categories:paper` facets (Paper,
+empty query, sorted by downloads) returns exactly this — BedWars1058,
+OneBlock, BentoBox, LifeWars, DonateCase, 1472 total hits. Not a guess.
+`cargo test`: 113 passed, 0 failed, real exit 0. `tsc --noEmit` and
+`vite build`: both clean. Walked it in the browser preview: selecting
+"Minigame" correctly narrowed a 4-item sample list down to the 2 tagged
+`minigame`, chip toggled its active state, clicking it again cleared back
+to "All" — screenshotted both states.
+
+## RCON pool: per-server locks (2026-08-31)
+
+The one real finding buried in an otherwise mostly-inaccurate "SaaS audit"
+the user relayed: `RconPool` held one `Mutex` across *every* server's RCON
+connection — a slow or hung call against one server could delay a command
+to a completely different one. Fixed with a `Mutex<HashMap<String,
+Arc<Mutex<Option<RconClient>>>>>` — the outer map lock is now only ever
+held for a `HashMap` lookup/insert, never across a connect or a round trip.
+Used plain `std::sync`, not the `tokio::sync` + `async fn` rewrite that was
+suggested alongside it — this codebase has no async command handlers
+anywhere else, so that would've meant converting every RCON-calling
+command's signature for no real benefit over the same fix in the
+primitives already used everywhere else here. `cargo check`: clean.
+
+## Batch 22 — crash-fix, Files editor, historical graphs (2026-08-31)
+
+Three of four items from a "what does CraftPanel actually need" review
+(the fourth, live config visualizers, is next). Real fixes for real gaps,
+not the SaaS-platform items from the same conversation that assumed
+CraftPanel has a hosted backend it doesn't have (billing, multi-user
+accounts, subdomain DNS) — those aren't built; see chat for why.
+
+**Crash analyzer names the missing dependency, not just the suspect mod:**
+`crashreports.rs` parses Forge/NeoForge's classic `Mod ID: 'x', Requested
+by: 'y', ... Actual version: '[MISSING]'` block — deliberately only that
+one long-stable format, not a guess at newer wordings Forge/NeoForge have
+varied across versions. The crash banner gets a "Find {mod}" button that
+jumps straight to Add-ons with the search pre-filled, reusing the install
+flow that already existed rather than trying to auto-resolve and silently
+install the wrong project.
+
+**Files tab: real syntax highlighting + drag-and-drop:**
+- A hand-rolled line-oriented tokenizer (`highlightConfig.ts`) for YAML,
+  JSON, `.properties`, TOML — not a parser, good enough to make a plugin
+  config scannable. Rendered via the standard "colored `<pre>` behind a
+  transparent-text `<textarea>`" trick, kept in scroll-sync, instead of
+  pulling in a full editor library for a handful of config files.
+- Drag-and-drop reuses the *exact same* `fs_import` command the "Add
+  files" dialog already called — Tauri hands over real filesystem paths on
+  drop (`getCurrentWebview().onDragDropEvent`), not browser File/Blob
+  objects, so no new backend surface was needed at all.
+
+**Historical graphs — two different problems, two different answers:**
+- **Player activity (peak hours)**: needed *zero* new persistence.
+  `analytics::concurrent_series` reuses the exact same log-parsing
+  `player_history` already had — Minecraft's own rotated logs already
+  contain every join/leave event forever; this just aggregates the same
+  parsed events as open intervals instead of per-player totals. Capped at
+  3000 buckets regardless of the requested range/resolution, so a
+  since=0-epoch request can't try to allocate millions of empty buckets.
+- **RAM/CPU/TPS history** genuinely needed new persistence, since those
+  numbers were never stored anywhere: a new `metric_samples` SQLite table,
+  a background `MetricsSampler` (mirrors `schedule.rs`'s thread pattern)
+  sampling every *running* server once a minute — deliberately coarse, a
+  30-day chart doesn't need per-second resolution, and each sample is a
+  real `sysinfo` refresh plus an RCON round trip — and 30-day retention
+  pruned on every tick.
+- Both render through one new hand-rolled `AreaChart` (no charting
+  library) that draws real gaps for null samples instead of dropping to
+  zero, since a gap tells the truth (server was off, or RCON wasn't set
+  up) and a zero would lie.
+
+**Verified:**
+- `cargo test`: 117 passed, 0 failed, real exit 0 — new tests for the
+  missing-dependency parser, `concurrent_series`'s overlap math (a real
+  3-player overlapping-session fixture, not a trivial case) and its
+  bucket-count safety cap.
+- `tsc --noEmit` and `vite build`: both clean.
+- Walked all three in the browser preview: crash banner → "Find
+  terrablender" → jumped to Add-ons with the search pre-filled and already
+  run; opened a YAML and a `.properties` file and confirmed real syntax
+  coloring plus live-typing still worked correctly; both new charts
+  rendering with real peak/latest labels and a visible TPS dip in the
+  simulated data, range chips present on both.
+
+## Batch 23 — live config visualizers (2026-08-31)
+
+The fourth and last item from the "what does CraftPanel actually need"
+review. Real toggles/sliders for EssentialsX, LuckPerms, and Geyser's
+`config.yml` instead of hand-editing YAML for a handful of common
+settings — every key was checked against each project's actual shipped
+config or official docs before writing any code (EssentialsX's real
+`config.yml` from its GitHub repo, LuckPerms' official config reference
+page, Geyser's real `bedrock:` block from its own setup docs — the same
+block `crossplay.rs` already parses one field of). Nothing here is a
+guess at a plugin's schema; anything not confirmed against a real source
+was left out rather than assumed.
+
+**Deliberately small, on purpose:** these three plugins ship *hundreds* of
+settings between them. This covers 3–8 per plugin — the ones worth a
+toggle instead of a text field. Everything else is still just a file,
+editable as text in Files (with real syntax highlighting now, from Batch
+22).
+
+**`pluginconfig.rs`** is not a general YAML parser — line-based,
+indentation-aware lookup/replace for a fixed, hand-verified key list per
+plugin, supporting one level of nesting (`bedrock.port`) since Geyser's
+real keys need it. Same line-preserving discipline `settings.rs` already
+uses for `server.properties`: every other byte in the file — comments, key
+order, unrelated keys — passes through untouched. Writing a missing key
+fails loudly instead of silently appending a new line in the wrong place.
+Int fields validate range, Select fields validate against the real option
+list, both before ever touching the file.
+
+Rendered via the exact same `SettingRow`/`Toggle`/`Select` components the
+server.properties editor already uses (`SettingsPanel.tsx`) — visually
+it's the same settings-list language the rest of the app already speaks,
+not a new pattern. Each plugin only gets a card if its config file is
+actually found in that server's folder.
+
+**Verified:**
+- `cargo test`: 125 passed, 0 failed, real exit 0. New tests cover reading
+  quoted/unquoted top-level and nested values, writing a top-level key
+  without disturbing anything else in the file, writing a nested key
+  without bleeding into a sibling block with the same child key name
+  (`bedrock.port` vs `remote.port` — a real trap a naive implementation
+  would fall into), a missing key erroring instead of silently appending,
+  int-range + select-option validation, and detection only picking up
+  what's actually installed.
+- Found and fixed a real flaky-test bug of my own making while writing
+  this batch's tests: `concurrent_series` (Batch 22) had a test anchored
+  to a fixed clock-time string ("01:00:00") — false the moment the test
+  actually ran near a UTC day boundary, which it did on the very next
+  `cargo test` after landing. Fixed by extracting the pure bucket-counting
+  math (`bucketize`) into its own function tested with plain synthetic
+  epoch numbers, and rewriting the integration-level test to compute its
+  log timestamps from `now()` minus a few seconds instead of a fixed
+  string — same discipline as everywhere else in this session: don't
+  trust a green run, verify it's green for the right reason.
+- `tsc --noEmit` and `vite build`: both clean.
+- Walked it in the browser preview: both EssentialsX and LuckPerms cards
+  render with real detected values, toggling "Spawn on join" saved and
+  came back reflecting the new state with no errors.
+
+## Batch 24 — Windows chrome, local PIN lock, Account tab (2026-08-31)
+
+Two unrelated asks landed together: fixing WebView2's native window chrome
+on Windows (white title bar, web-style right-click menu), and a local
+"Account" concept — a real profile/identity area plus a PIN lock, not the
+hosted multi-user accounts idea from earlier in the day, which the user
+explicitly ruled out for now.
+
+**Windows title bar:** `decorations: false` via a new
+`tauri.windows.conf.json` platform override (macOS keeps its native
+traffic lights — nobody asked for those to change, and a native title bar
+is the expected feel there). Replaced with `TitleBar.tsx` — a
+`data-tauri-drag-region` strip with the CraftPanel wordmark and real
+minimize/maximize-restore/close buttons drawn in the app's own dark
+palette, double-click-to-maximize, close hovers to the same red Windows
+users already expect. Built against the real `getCurrentWindow()` API
+(`.minimize()`, `.toggleMaximize()`, `.close()`, `.isMaximized()`,
+`.onResized()`) confirmed via `@tauri-apps/api`'s actual type
+definitions, not guessed.
+
+**Honesty about what could and couldn't be verified:** this is Windows-
+only chrome and there's no Windows machine here to run the real build on.
+`tsc` confirms the API calls are real and type-correct, and the component
+itself was verified rendering + wiring up correctly in the browser preview
+(forced via a temporary `?forceOs=win` debug flag, removed before
+finishing) — but the actual "does WebView2 really remove its native frame
+and does this look right at 100% zoom on a real Windows box" can only be
+confirmed once the user runs it there.
+
+**Right-click menu:** WebView2/WKWebView's default context menu ("Back",
+"Reload", "Inspect Element") was never suppressed — a real, confirmed gap,
+not assumed. Fixed with a single `contextmenu` listener in `main.tsx` that
+blocks it everywhere except genuinely editable surfaces (inputs,
+textareas, contenteditable, anything marked `[data-selectable]`) where the
+native Cut/Copy/Paste menu is real functionality, not chrome.
+
+**Scrollbars:** checked first — custom thin scrollbar CSS (`::-webkit-
+scrollbar`) already existed in `index.css` before this batch. Couldn't
+reproduce or explain the "native web" complaint from here; flagged to the
+user rather than either claiming it's fixed or silently rebuilding
+something that already exists.
+
+**Local PIN lock (`lock.rs`, new):** a real password lock on the app
+window — Argon2-hashed (a proper salted KDF, not a bare SHA-256, even
+though the threat model here is "someone picks up your laptop," not a
+network attacker), stored in its own `lock.json` next to `r2.json` rather
+than in the main SQLite database, specifically so "I forgot my PIN" has an
+honest, low-cost recovery path: delete one small file, not the whole app
+database (which would also forget every server CraftPanel knows about).
+Shown by `App.tsx` before anything else renders once `lock_status()` says
+one's configured — but the new Windows title bar still renders around it,
+so minimize/close remain usable while locked.
+
+**Account tab (new, in the Settings page from Batch 20):** the local
+profile/identity area — moved "This install" (the device id) here from
+About, plus the new PIN set/change/remove flow. Deliberately *not* the
+hosted-accounts idea from earlier — no login, no server-side anything.
+
+**Verified:**
+- `cargo test`: 131 passed, 0 failed, real exit 0. New `lock.rs` tests
+  cover: not set until saved, PINs under 4 chars rejected (and don't leave
+  a file behind), correct/wrong/empty PIN checks, checking before any PIN
+  exists is `false` not a panic, `clear` requires the right PIN and a
+  failed clear doesn't remove the lock, and — the one that actually proves
+  this isn't a bare hash — the same PIN set on two different `Lock`s
+  produces two different stored hashes (real per-hash salting, not a
+  deterministic digest).
+- `tsc --noEmit` and `vite build`: both clean.
+- Walked the whole lock flow in the browser preview: locked on load,
+  wrong PIN shows "That's not it." and clears the field, correct PIN
+  unlocks into the normal app; Account tab shows the install id and a
+  live "PIN set" badge; Change PIN opens the right three-field form.
+
+## Batch 25 — remote API (Android companion prerequisite)
+
+Ground laid for the Android companion app the user asked for ("tauri" client,
+"for android only"). Phones can't run Minecraft servers, so the companion is
+a thin client, not an embedded copy of the server-management logic — it
+needs something on the desktop to talk to.
+
+**`remote_api.rs` (new):** a small `tiny_http`-based HTTP API on the desktop
+app, off by default. When switched on it binds `0.0.0.0` (not just
+localhost) on a fixed port (8642) — reachable the same way friends already
+join a server, over the public IP, no hosted backend, no new tunnel
+infrastructure. Every request needs a bearer token, generated on first use
+and stored in its own `remote_api.json` (same pattern as `lock.json`/
+`r2.json` — separate from both the main DB and the local PIN in `lock.rs`;
+the PIN gates the desktop app itself, this token gates a *different device*
+talking to it at all).
+
+Endpoints (all JSON, all token-gated): `GET /api/servers`, `GET
+/api/servers/:id`, `POST /api/servers/:id/start`, `POST
+/api/servers/:id/stop`, `GET`/`POST /api/servers/:id/console`, `GET
+/api/servers/:id/players`. Each one calls the *exact same* `commands.rs`
+functions the desktop UI itself calls (`start_server`, `rcon_players`, …) —
+no parallel logic to keep in sync. REST-polling only for v1, no WebSocket,
+matching how the rest of this frontend already gets its live data.
+
+Listener runs on its own thread with a 500ms `recv_timeout` poll loop, so
+turning it off doesn't block the caller waiting for a real socket join —
+the thread just notices the stop flag within half a second and exits.
+
+**Settings → Account → "Remote access" card (new):** on/off toggle, token
+with copy button + regenerate, and a pairing QR (reuses the same
+`qr_svg`/`net::public_ip` machinery the per-server join-address QR already
+uses) encoding `{host, port, token}` for the Android app to scan.
+
+**Deliberately not built yet:** the actual Android app shell (`tauri
+android init` and the UI itself) — this batch is the prerequisite API only.
+
+**Verified:**
+- `cargo test`: 137 passed, 0 failed, real exit 0. New `remote_api.rs`
+  tests cover config load/save only (default-disabled with a real token,
+  status reads are stable — not silently minting a new token on every
+  call, which was a real bug caught and fixed before it shipped —
+  regenerate changes the token without touching `enabled`, `stop()`
+  persists disabled even when nothing was running). Deliberately does
+  *not* bind the real listener socket in a test — the port is fixed, and
+  binding in an automated test would be exactly the environment-dependent
+  flakiness this project got bitten by once already (see Batch 22's
+  `bucketize` fix) — a real desktop CraftPanel could be running on the
+  same machine and already holding that port.
+- `cargo build`: clean, zero warnings.
+- `tsc --noEmit`: clean.
+- Walked the whole flow in the browser preview: toggled remote access on,
+  saw the token + QR render, hit "Generate a new token" and watched both
+  update with a confirmation toast, toggled off and watched the card
+  collapse back to just the switch.
+- **Not verified from this Mac:** an actual phone hitting the real HTTP
+  server over a real network — the preview above only exercises the
+  Settings UI against a mock. Should be checked for real once there's an
+  Android build to test with, and again if/when it's reachable from
+  outside the LAN (UPnP forwarding this control port, same as a server's
+  game port needs).
+
+## Bugfix — updater never had a repo, and About's link could double up "github.com"
+
+Both traced to the same root cause: the "GitHub repo" Settings field stored
+whatever was typed, completely unnormalized, and the updater/About link did
+nothing sensible when it was empty or malformed.
+
+- **`updater.rs`**: `check()`/`install()` used to return "Set your GitHub
+  repo in Settings" whenever the field was blank — which it always was
+  unless someone found and filled it in. Added `DEFAULT_REPO =
+  "Rashica07/craftpanel"` (this app's own repo) as the fallback, and a real
+  `normalize_repo()` that turns a pasted `https://github.com/owner/repo`,
+  one with a trailing `.git`/`/`, or — the exact shape that broke the About
+  link — `github.com/owner/repo` (even doubled:
+  `github.com/github.com/owner/repo`) into a clean `owner/repo`.
+- **`AboutTab`**: same normalization mirrored in TS, applied to whatever's
+  configured before building the link, falling back to the same default
+  repo — the "About" link was building `https://github.com/${githubRepo}`
+  from the raw stored string with no cleanup at all.
+- The Settings field itself now normalizes on blur, so a pasted URL gets
+  cleaned up right there instead of persisting broken.
+
+**Verified:**
+- `cargo test`: 143 passed, 0 failed (14 ignored — live-network tests,
+  unchanged pattern from `modrinth.rs`'s live tests). New `updater.rs`
+  tests cover: no-repo/blank/whitespace all fall back to the default,
+  bare `owner/repo` passes through, scheme+host+`www.` all get stripped,
+  trailing `.git`/`/` get stripped, the doubled-`github.com` bug
+  specifically (single and doubled), and garbage (no slash, two slashes,
+  a space) is rejected rather than silently accepted.
+- Ran the one live test explicitly (`cargo test -- --ignored`): a real
+  check against `Rashica07/craftpanel`'s actual GitHub releases succeeded
+  (`unavailable` was `None`) — confirms this isn't just passing against
+  mocked logic, the real update check now works with nothing configured.
+- `tsc --noEmit`: clean.
+
+## Batch 26 — Android companion app (v1 shell)
+
+First real slice of the Android companion (Tauri client, per the user's
+explicit "tauri" + "for android only" direction) — a separate app, not
+bolted onto the desktop project, since a phone can't run a Minecraft server.
+It's a thin client for `remote_api.rs` (Batch 25).
+
+**New `mobile/` project:** `com.craftpanel.mobile`, Tauri v2 + React, Android
+target only (no iOS init run). `src-tauri/gen/android` committed (the normal
+Tauri workflow) with one manual patch: `usesCleartextTraffic` forced to
+`"true"` for both build types in `build.gradle.kts` — the remote API is
+plain HTTP (a home server has no TLS cert to offer), and this app needs that
+in release builds too, not just its own dev server.
+
+**`mobile/src/api.ts`:** plain `fetch()` client, no Tauri commands — talks
+to the desktop over the network like a Minecraft client would. Pairing
+(host/port/token) stored in `localStorage`, parsed either from the JSON
+blob the desktop's pairing QR/copy button hands out or typed in by hand.
+
+**`mobile/src/App.tsx`:** three screens — pair (paste code, or manual
+host/port/token entry), servers list (5s poll, start/stop), server detail
+(4s poll: status, player count, console tail + send). Same dark palette and
+accent as the desktop app (`App.css`), not a generic template look.
+
+**Real bug caught before it shipped:** the desktop's `remote_api.rs` had no
+CORS headers. The Android WebView loads the app from its own origin, so
+every `fetch()` to the desktop is cross-origin, and the `Authorization`
+header makes it a non-simple request requiring a preflight `OPTIONS` —
+without `Access-Control-Allow-*` headers the browser would've silently
+discarded every response, not thrown a network error, so this would have
+looked like "it just doesn't work" with nothing useful in the logs. Added
+an `OPTIONS` handler (answered before the auth check — preflight carries no
+token) and CORS headers on every response.
+
+**Toolchain set up on this Mac:** Android SDK/NDK were already present
+(from a prior Android Studio install) but unwired — added `ANDROID_HOME`/
+`ANDROID_SDK_ROOT`/`NDK_HOME` to `~/.zshrc`, installed the 4 Android rustup
+targets (aarch64/armv7/i686/x86_64-linux-android).
+
+**Verified:**
+- `tsc --noEmit` on `mobile/`: clean.
+- `cargo tauri android build --target aarch64 --debug`: real success —
+  cross-compiled the full Tauri/wry stack for `aarch64-linux-android`
+  (~2.5 min first build), linked against the NDK, ran Gradle, produced a
+  real installable APK and AAB. This is the whole toolchain end to end,
+  not just a Rust compile — proves SDK/NDK/Gradle/rustup are all correctly
+  wired on this machine.
+- Installed the APK on a real booted Android emulator (API 35) and
+  launched it — the pairing screen rendered pixel-correct: brand mark,
+  dark theme, accent color, the pairing-code field, Connect button, all
+  matching the design. Confirmed by screenshot.
+- **Not verified:** actually pairing against a live desktop instance (would
+  need the real desktop app running with Remote access on, reachable from
+  the emulator), and the manual-entry/servers/detail screens. The emulator
+  on this Mac hit repeated `system_server`/SystemUI ANRs from host resource
+  contention (unrelated to CraftPanel — the same instability showed up
+  before the app was ever launched, in plain `adb install`) — pairing
+  screen confirmation was captured and further interaction testing was cut
+  short rather than keep fighting a resource-starved emulator. Worth
+  re-testing on a physical device or a less loaded machine, and doing a
+  real pairing test against the desktop app once that's convenient.
+- Emulator was shut down afterward (`adb emu kill`) to free up the host.
+
+**Not built yet:** camera QR scanning (v1 pairing is copy-paste of the
+JSON blob only), and the fuller nav (home/packages/files/account) from the
+"arm-mc" reference screenshots — this batch is the working v1 shell only.
+
+## Bugfix — macOS CPU% stuck at a flat 0%, tick rate showing "0ms"
+
+Both from the live health strip on the server console. Traced with real
+evidence, not guessed:
+
+- **Tick rate "0ms" wasn't a bug.** The real server output is `Average
+  time per tick: 0.2ms` (confirmed by running `/tick query` on the actual
+  live MCServ) — correctly parsed, just rounded to the nearest whole ms for
+  display, which rounds a genuinely healthy 0.2ms down to nothing.
+  [HealthStrip.tsx](src/components/HealthStrip.tsx) now shows one decimal.
+- **CPU% *was* a real bug.** Read sysinfo 0.32.1's actual macOS source
+  (`~/.cargo/registry/.../sysinfo-0.32.1/src/unix/apple/macos/process.rs`):
+  a process's CPU-time baseline (`old_stime`/`old_utime`) starts at `0`
+  the moment `sysinfo` first sees that process, and only gets seeded with
+  a real value the *next* time it's refreshed. `process_sample()` used to
+  create a brand-new `System::new()` on every call and refresh it twice —
+  meaning every single call was that process's first *and* second
+  appearance, so the real-baseline check never once passed. Proved this
+  empirically before writing the fix: a synthetic CPU-burning thread read
+  `Some(0.0)` after 2 refreshes and `Some(88.49)` after a 3rd, on the same
+  `System`.
+- **Fix:** [perf.rs](src-tauri/src/perf.rs) now shares one `System` across
+  every call (a lazily-initialized `Mutex<System>`) instead of creating a
+  fresh one each time — a process's second real poll (a few seconds later,
+  same cadence the frontend already polls at) has a real baseline to diff
+  against. Also removes the ~440ms of blocking sleep the old per-call
+  two-refresh dance cost on *every single poll* — this is strictly faster,
+  not just correct now.
+
+**Verified:**
+- New test `second_sample_of_a_busy_process_is_nonzero`: spins a real
+  CPU-burning thread, asserts the second sample (not the first — a cold
+  read is legitimately allowed to be 0%) is `> 1.0`. `cargo test`: 144
+  passed, 0 failed.
+- `tsc --noEmit`: clean.
+- Live-verified in the running app: rebuilt release, safe-swapped into
+  `/Applications` (server stayed up mid-swap, confirmed by a
+  `[scheduler] scheduled backup done` restart landing naturally during
+  verification — not a crash, coincidental timing), watched CPU read
+  real, moving values (130% → 193%) instead of a flat 0% while MCServ
+  booted back up.
+- **Known miss this pass:** the DMG-bundling step (`bundle_dmg.sh`) failed
+  outright on this build (`create-dmg` usage error) even with no stale
+  `/Volumes/CraftPanel*` mount — the documented gotcha didn't apply this
+  time. Verified against the built `.app` directly instead. Not
+  investigated further since it wasn't blocking; worth a look before
+  cutting a real release DMG for the user.
+
+## Bugfix — a stopped server could get permanently stuck in "Stopping" (found live, on a real server, mid-session)
+
+The user's real MCServ sat in "Stopping" for 38 minutes after a stop
+request, with `kill -9` in the log but the JVM still alive. Root cause
+found by reading the actual code, not guessed, and cross-checked against
+`ps` on the live process before touching anything:
+
+`Runtime.adopted_pid` — set once by `adopt()` when a server is reattached
+after a CraftPanel restart — was **never cleared**. Every `stop()`/`kill()`
+checks `adopted_pid` first; once a server had been reattached even a
+single time, *every future stop on that server id, for the rest of the
+app's life, including after a completely fresh `start()`*, kept targeting
+that old, long-dead pid over RCON instead of the real child process this
+app itself was holding a handle to. The real JVM never got a correct kill
+signal — in this case it also independently hung on its own internal RCON-
+thread cleanup (a real Fabric/Minecraft-side issue, visible in the pasted
+`GenericThread.stop()`/`RconClient.stop()` stack traces — not something
+CraftPanel can fix), so nothing was left to force it down.
+
+Fixed in [process.rs](src-tauri/src/process.rs): `start_inner()` now clears
+`adopted_pid`/`rcon` the moment it spawns a real child process, so a fresh
+start always fully retakes ownership. Also hardened both stop watchdogs to
+never trail off silently — each confirms the kill actually landed (or logs
+a `kill` error) instead of going quiet with the UI stuck on "Stopping"
+forever if it doesn't.
+
+**Verified:**
+- New test `stopping_after_a_restart_does_not_target_the_old_adopted_pid`
+  reproduces the exact adopt → exit → restart → stop sequence with real
+  child processes (no mocking). Confirmed it's a real regression guard, not
+  a tautology: reverted the fix, re-ran — the test fails with the *exact*
+  matching symptom (`timed out waiting for: stopped again`) — restored the
+  fix, re-ran — passes. `cargo test`: 147 passed, 0 failed.
+- Live: the user's actual stuck server (pid 11990) was still running 38
+  minutes after the stop request when checked via `ps aux` — killed it
+  directly to give them their machine back, *then* found and fixed the
+  actual bug rather than just treating the symptom.
+
+## Batch 27 — version/loader switching, cloning, Discord alerts, Dashboard, power scheduler (2026-09-01)
+
+Six features approved together, shipped as v2.5.5:
+
+- **Change server version/loader** — [ChangeVersionModal.tsx](src/components/ChangeVersionModal.tsx)
+  + [provision.rs](src-tauri/src/provision.rs)`::change_version`. Vanilla/Paper/
+  Fabric only (Forge/NeoForge/Bedrock get a clear "not supported" error, not a
+  silent failure). Refuses while running, takes an automatic backup first,
+  reuses the same `download_vanilla`/`download_paper`/`download_fabric` code
+  `create()` already uses rather than duplicating it.
+- **Duplicate server** — [CloneServerModal.tsx](src/components/CloneServerModal.tsx)
+  + [clone.rs](src-tauri/src/clone.rs). Reuses `backups::collect_files`'s
+  existing junk-filter (made `pub(crate)`) so the clone doesn't drag along
+  logs/caches. New port picked the same way `create_server` does.
+  Refuses on a non-empty destination and while the source is running.
+- **Discord webhook alerts** — [discord.rs](src-tauri/src/discord.rs), a test
+  button in Settings → General. Pings on Crashed / unexpected stop / clean
+  Stop only — deliberately silent on every Running transition and every
+  successful backup, to avoid notification fatigue.
+- **One-click plugin/mod templates** — [TemplateModal.tsx](src/components/TemplateModal.tsx).
+  Plugin slugs (`iridiumskyblock`, `bedwars1058`, `essentialsx`) verified live
+  against Modrinth's search API before being pinned, not guessed.
+- **Multi-server Dashboard** — [Dashboard.tsx](src/components/Dashboard.tsx),
+  new "Overview" nav item (only shown once you have 2+ servers). Matches the
+  sidebar's existing `StatusDot` + text convention rather than inventing a
+  new per-loader icon.
+- **Power-aware scheduler** — "Stay awake on power" toggle (Settings →
+  General) + a per-server "Start every day at" time (Settings → Automation).
+  [power.rs](src-tauri/src/power.rs) reuses the same `caffeinate -i -s` trick
+  the per-server keep-awake already used, but untied from any single
+  server's lifetime so a scheduled start can actually fire on a server
+  that's currently stopped. [schedule.rs](src-tauri/src/schedule.rs)'s
+  existing tick engine gained a `scheduled_start` field following the exact
+  pattern `daily_restart` already used. Only fires if the server isn't
+  already running; needs the Mac to actually be awake at that time, hence
+  pairing with the power toggle.
+
+**Verified:** `cargo build`/`cargo test` clean (147 passed) at v2.5.5,
+`npx tsc --noEmit` clean on the frontend.
 
 ## Other future ideas — sized, not yet scheduled
 

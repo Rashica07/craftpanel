@@ -7,6 +7,7 @@ import type {
   JavaInfo,
   ProvisionProgress,
   R2Status,
+  RemoteApiStatus,
   UpdateCheck,
 } from "../types";
 import {
@@ -32,12 +33,15 @@ const DEFAULTS: AppSettings = {
   expertMode: false,
   keepServersOnQuit: false,
   githubRepo: "",
+  discordWebhookUrl: "",
+  stayAwakeOnPower: false,
 };
 
-type Tab = "general" | "updates" | "java" | "cloud" | "diagnostics" | "about";
+type Tab = "general" | "account" | "updates" | "java" | "cloud" | "diagnostics" | "about";
 
 const TABS: TabDef[] = [
   { id: "general", label: "General", icon: "sliders" },
+  { id: "account", label: "Account", icon: "user" },
   { id: "updates", label: "Updates", icon: "download" },
   { id: "java", label: "Java", icon: "cpu" },
   { id: "cloud", label: "Cloud & Backups", icon: "cloud" },
@@ -46,6 +50,28 @@ const TABS: TabDef[] = [
 ];
 
 const JAVA_FEATURES = [17, 21, 25] as const;
+
+/** CraftPanel's own repo — mirrors the fallback baked into `updater.rs`, so
+ *  update checks work with this field left blank, not just after typing
+ *  something in. */
+const DEFAULT_REPO = "Rashica07/craftpanel";
+
+/** Same normalization as `updater::normalize_repo` on the Rust side — turns
+ *  a pasted full URL (or one with a stray "github.com/" still stuck on the
+ *  front) into a clean "owner/repo", or null if it still doesn't look like
+ *  one. Applied on blur so the About link and update checks never end up
+ *  pointed at "github.com/github.com/owner/repo". */
+function normalizeRepo(input: string): string | null {
+  let s = input.trim();
+  s = s.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+  while (/^github\.com\//i.test(s)) s = s.slice("github.com/".length);
+  s = s.replace(/\/+$/, "").replace(/\.git$/i, "");
+  const parts = s.split("/");
+  if (parts.length !== 2) return null;
+  const [owner, repo] = parts;
+  const valid = (p: string) => p.length > 0 && /^[A-Za-z0-9._-]+$/.test(p);
+  return valid(owner) && valid(repo) ? `${owner}/${repo}` : null;
+}
 
 /**
  * The app's own settings, promoted from a cramped modal to a full page —
@@ -119,6 +145,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
       <div key={tab} className="cp-in min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
         <div className="mx-auto max-w-2xl space-y-4">
           {tab === "general" && <GeneralTab s={s} set={set} />}
+          {tab === "account" && <AccountTab />}
           {tab === "updates" && <UpdatesTab s={s} set={set} onDirtySave={dirty ? save : undefined} />}
           {tab === "java" && <JavaTab s={s} set={set} />}
           {tab === "cloud" && <CloudTab />}
@@ -140,6 +167,7 @@ function GeneralTab({
   set: <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => void;
 }) {
   return (
+    <>
     <Card title="Defaults for new servers" icon="sliders">
       <Field label="Default Java" hint="used for new servers — blank = whatever's on PATH">
         <TextInput
@@ -179,6 +207,18 @@ function GeneralTab({
 
       <label className="mt-3 flex items-start justify-between gap-3 border-t border-line-soft pt-3">
         <span className="text-sm">
+          Stay awake on power
+          <span className="mt-0.5 block text-2xs text-ink-faint">
+            Stops this Mac from sleeping while it's plugged in — on battery it still sleeps
+            normally. What lets a server's scheduled start (set per-server, under Settings →
+            Automation) actually fire instead of sitting there asleep.
+          </span>
+        </span>
+        <Toggle checked={s.stayAwakeOnPower} onChange={(v) => set("stayAwakeOnPower", v)} />
+      </label>
+
+      <label className="mt-3 flex items-start justify-between gap-3 border-t border-line-soft pt-3">
+        <span className="text-sm">
           Expert mode
           <span className="mt-0.5 block text-2xs text-ink-faint">
             Shows the raw <code>server.properties</code> editor and other power tools.
@@ -186,6 +226,57 @@ function GeneralTab({
         </span>
         <Toggle checked={s.expertMode} onChange={(v) => set("expertMode", v)} />
       </label>
+    </Card>
+    <DiscordCard s={s} set={set} />
+    </>
+  );
+}
+
+function DiscordCard({
+  s,
+  set,
+}: {
+  s: AppSettings;
+  set: <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => void;
+}) {
+  const [testing, setTesting] = useState(false);
+
+  async function sendTest() {
+    setTesting(true);
+    try {
+      await api.discordTestWebhook(s.discordWebhookUrl);
+      toast.ok("Sent — check the channel.");
+    } catch (e) {
+      toast.bad("Couldn't reach that webhook", String(e));
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Discord notifications"
+      icon="bell"
+      className="mt-4"
+      description="Pings a Discord channel when a server crashes, stops on its own, starts lagging (below 15 tps), or a scheduled backup fails — the things worth knowing about away from the app. Quiet on purpose otherwise: no ping for a normal Stop, and no daily 'backup done' spam."
+    >
+      <Field label="Webhook URL" hint="Discord channel → Edit Channel → Integrations → Webhooks → New/Copy Webhook URL.">
+        <TextInput
+          value={s.discordWebhookUrl}
+          onChange={(e) => set("discordWebhookUrl", e.target.value)}
+          placeholder="https://discord.com/api/webhooks/…"
+        />
+      </Field>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-2"
+        loading={testing}
+        disabled={!s.discordWebhookUrl.trim()}
+        onClick={sendTest}
+      >
+        Send test message
+      </Button>
     </Card>
   );
 }
@@ -240,13 +331,19 @@ function UpdatesTab({
     <Card
       title="Updates"
       icon="download"
-      description="Set your GitHub repo once, then check and install new releases from here."
+      description="Checks and installs releases from CraftPanel's own GitHub repo — only set this if you're running a fork and want it to update from yours instead."
     >
-      <Field label="GitHub repo" hint="e.g. yourname/craftpanel">
+      <Field label="GitHub repo" hint={`Leave blank to use ${DEFAULT_REPO}. Pasting a full github.com URL is fine — it gets cleaned up.`}>
         <TextInput
           value={s.githubRepo}
           onChange={(e) => set("githubRepo", e.target.value)}
-          placeholder="owner/repo"
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (!v) return;
+            const normalized = normalizeRepo(v);
+            if (normalized && normalized !== v) set("githubRepo", normalized);
+          }}
+          placeholder={DEFAULT_REPO}
         />
       </Field>
 
@@ -605,44 +702,53 @@ function DiagnosticsTab() {
 
 function AboutTab({ githubRepo }: { githubRepo: string }) {
   const [version, setVersion] = useState<string | null>(null);
-  const [installId, setInstallId] = useState<string | null>(null);
 
   useEffect(() => {
     api.checkUpdate().then((u) => setVersion(u.current)).catch(() => {});
+  }, []);
+
+  const repo = (githubRepo.trim() && normalizeRepo(githubRepo)) || DEFAULT_REPO;
+
+  return (
+    <Card title="CraftPanel" icon="info">
+      <div className="flex items-center gap-3">
+        <div>
+          <div className="text-sm font-medium text-ink">
+            Version {version ?? "…"}
+          </div>
+          <div className="mt-0.5 text-2xs text-ink-faint">
+            A self-hosted Minecraft server manager.
+          </div>
+        </div>
+        <a
+          href={`https://github.com/${repo}`}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto flex items-center gap-1 text-2xs text-accent-soft underline"
+        >
+          <Icon name="external-link" size={11} />
+          {repo}
+        </a>
+      </div>
+    </Card>
+  );
+}
+
+/* ─────────────────────────────── Account ──────────────────────────────── */
+
+function AccountTab() {
+  const [installId, setInstallId] = useState<string | null>(null);
+
+  useEffect(() => {
     api.appInstallId().then(setInstallId).catch(() => {});
   }, []);
 
   return (
     <>
-      <Card title="CraftPanel" icon="info">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="text-sm font-medium text-ink">
-              Version {version ?? "…"}
-            </div>
-            <div className="mt-0.5 text-2xs text-ink-faint">
-              A self-hosted Minecraft server manager.
-            </div>
-          </div>
-          {githubRepo && (
-            <a
-              href={`https://github.com/${githubRepo}`}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto flex items-center gap-1 text-2xs text-accent-soft underline"
-            >
-              <Icon name="external-link" size={11} />
-              {githubRepo}
-            </a>
-          )}
-        </div>
-      </Card>
-
       <Card
         title="This install"
         icon="key"
         description="A random id for this install of CraftPanel — not you, not your servers' content. It's what gets written into a server's hidden .craftpanel-meta.json when CraftPanel creates or adopts it, so a server folder can be traced back to the install that made it. Nothing leaves your machine on its own; it only ever shows up if a server is shared through CraftPanel's own sync."
-        className="mt-4"
       >
         {installId ? (
           <CopyField value={installId} size="sm" />
@@ -650,6 +756,307 @@ function AboutTab({ githubRepo }: { githubRepo: string }) {
           <div className="text-2xs text-ink-faint">Loading…</div>
         )}
       </Card>
+
+      <LockCard />
+      <RemoteApiCard />
     </>
+  );
+}
+
+function RemoteApiCard() {
+  const [status, setStatus] = useState<RemoteApiStatus | null>(null);
+  const [pairPayload, setPairPayload] = useState<string | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    api.remoteApiStatus().then(setStatus).catch(() => {});
+  };
+  useEffect(load, []);
+
+  useEffect(() => {
+    if (!status?.running) {
+      setPairPayload(null);
+      setQr(null);
+      return;
+    }
+    // one fetch feeds both the "Copy" button and the QR — they need to be
+    // the exact same code, not two independent requests that could race
+    // and disagree if the token rotates mid-load.
+    api
+      .remoteApiPairPayload()
+      .then((payload) => {
+        setPairPayload(payload);
+        return api.qrSvg(payload);
+      })
+      .then(setQr)
+      .catch(() => {
+        setPairPayload(null);
+        setQr(null);
+      });
+  }, [status?.running, status?.token]);
+
+  async function toggle(enabled: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.remoteApiSetEnabled(enabled));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function regenerate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.remoteApiRegenerateToken());
+      toast.ok("New token generated — re-pair the Android app.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Remote access"
+      icon="smartphone"
+      description="Lets the CraftPanel Android app see and control your servers from your phone — reachable the same way friends join your servers (your public IP), so it works away from home too. Off by default; anyone with the token below can control your servers, so keep it private and turn this off when you're not using the app."
+      className="mt-4"
+      right={
+        status ? (
+          <Badge tone={status.running ? "ok" : "neutral"} dot>
+            {status.running ? "On" : "Off"}
+          </Badge>
+        ) : undefined
+      }
+    >
+      <div className="flex items-center gap-2">
+        <Toggle
+          checked={status?.enabled ?? false}
+          disabled={busy || !status}
+          onChange={toggle}
+          label="Remote access"
+        />
+        <span className="text-2xs text-ink-faint">
+          {status?.running
+            ? `Listening on port ${status.port}`
+            : "Turn on to pair your phone"}
+        </span>
+      </div>
+
+      {error && <p className="mt-2 text-2xs text-bad-soft">{error}</p>}
+
+      {status?.running && (
+        <div className="mt-3 flex flex-wrap items-start gap-4">
+          <div className="min-w-0 flex-1 space-y-2">
+            <Field
+              label="Pairing code"
+              hint="Paste this into the Android app's “Pairing code” box — it's the host, port, and token together, not just the token below."
+            >
+              <CopyField value={pairPayload ?? "Loading…"} size="sm" />
+            </Field>
+            <Field label="Token only" hint="For the app's manual host/port/token entry — not what most people want.">
+              <CopyField value={status.token} size="sm" />
+            </Field>
+            <Button variant="ghost" size="sm" loading={busy} onClick={regenerate}>
+              Generate a new token
+            </Button>
+          </div>
+          {qr && (
+            <div className="flex shrink-0 flex-col items-center gap-2">
+              <div
+                className="h-[124px] w-[124px] rounded-lg bg-white p-2 shadow-e2 [&>svg]:h-full [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: qr }}
+              />
+              <span className="flex items-center gap-1 text-2xs text-ink-faint">
+                <Icon name="smartphone" size={11} />
+                Scan to pair
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+type LockMode = "idle" | "set" | "change" | "remove";
+
+function LockCard() {
+  const [isSet, setIsSet] = useState<boolean | null>(null);
+  const [mode, setMode] = useState<LockMode>("idle");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    api.lockStatus().then(setIsSet).catch(() => setIsSet(false));
+  };
+  useEffect(load, []);
+
+  function reset() {
+    setMode("idle");
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  async function submitSet() {
+    if (next !== confirm) return setError("Those two don't match.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api.lockSet(next);
+      toast.ok("PIN set — CraftPanel will ask for it next launch.");
+      reset();
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitChange() {
+    if (next !== confirm) return setError("Those two don't match.");
+    setBusy(true);
+    setError(null);
+    try {
+      if (!(await api.lockCheck(current))) throw new Error("Current PIN is wrong.");
+      await api.lockSet(next);
+      toast.ok("PIN changed.");
+      reset();
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRemove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.lockClear(current);
+      toast.ok("PIN removed — CraftPanel opens straight to your servers now.");
+      reset();
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="App lock"
+      icon="lock"
+      description="A local PIN CraftPanel asks for on launch — for a shared computer, not real security against someone with access to the files. Doesn't touch your servers or their worlds."
+      className="mt-4"
+      right={
+        isSet == null ? undefined : (
+          <Badge tone={isSet ? "ok" : "neutral"} dot>
+            {isSet ? "PIN set" : "Not set"}
+          </Badge>
+        )
+      }
+    >
+      {mode === "idle" && (
+        <div className="flex gap-2">
+          {!isSet ? (
+            <Button variant="secondary" size="sm" icon="lock" onClick={() => setMode("set")}>
+              Set a PIN
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setMode("change")}>
+                Change PIN
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => setMode("remove")}>
+                Remove PIN
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {(mode === "set" || mode === "change") && (
+        <div className="space-y-2">
+          {mode === "change" && (
+            <Field label="Current PIN">
+              <TextInput
+                type="password"
+                autoFocus
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+              />
+            </Field>
+          )}
+          <Field label="New PIN" hint="At least 4 characters.">
+            <TextInput
+              type="password"
+              autoFocus={mode === "set"}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+            />
+          </Field>
+          <Field label="Confirm new PIN">
+            <TextInput
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </Field>
+          {error && <p className="text-2xs text-bad-soft">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <Button
+              variant="primary"
+              size="sm"
+              loading={busy}
+              disabled={!next || !confirm || (mode === "change" && !current)}
+              onClick={mode === "set" ? submitSet : submitChange}
+            >
+              Save
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reset} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {mode === "remove" && (
+        <div className="space-y-2">
+          <Field label="Current PIN, to confirm">
+            <TextInput
+              type="password"
+              autoFocus
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </Field>
+          {error && <p className="text-2xs text-bad-soft">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <Button variant="danger" size="sm" loading={busy} disabled={!current} onClick={submitRemove}>
+              Remove PIN
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reset} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

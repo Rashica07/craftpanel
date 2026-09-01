@@ -257,6 +257,73 @@ pub fn create(spec: &CreateSpec, progress: &ProgressFn) -> Result<Created, Strin
     })
 }
 
+/// Swaps an *existing* server's jar/loader in place — world, plugins/mods,
+/// configs, and everything else in the folder is left completely alone.
+/// Only the launcher file itself changes.
+///
+/// Deliberately narrower than [`create`]: Forge/NeoForge need their
+/// installer's multi-file output (`libraries/`, run scripts, …) replaced
+/// as a set, and Bedrock is a whole different binary/versioning story —
+/// both are real work for a follow-up, not attempted here. Vanilla/Paper/
+/// Fabric are each just "download one jar to a known filename", which is
+/// exactly what [`download_vanilla`]/[`download_paper`]/[`download_fabric`]
+/// already do — reused as-is rather than duplicated.
+pub fn change_version(
+    rec: &crate::db::ServerRecord,
+    loader: Loader,
+    mc_version: String,
+    loader_version: Option<String>,
+    progress: &ProgressFn,
+) -> Result<Created, String> {
+    if !matches!(loader, Loader::Vanilla | Loader::Paper | Loader::Fabric) {
+        return Err(
+            "Changing to Forge, NeoForge, or Bedrock isn't supported yet — create a new server for that.".into(),
+        );
+    }
+    let dir = Path::new(&rec.path);
+    if !dir.is_dir() {
+        return Err("Server folder not found.".into());
+    }
+
+    let spec = CreateSpec {
+        loader,
+        mc_version: mc_version.clone(),
+        loader_version,
+        dir: rec.path.clone(),
+        name: rec.name.clone(),
+        ram_mb: rec.ram_mb,
+        java_path: Some(rec.java_path.clone()).filter(|s| !s.is_empty()),
+        accept_eula: true, // already accepted when this server was first created
+        seed: None,
+        gamemode: None,
+        difficulty: None,
+        motd: None,
+        max_players: None,
+    };
+
+    // best-effort: drop the old launcher file so a stale jar doesn't linger
+    // and confuse a future "what's actually running here" — never touches
+    // anything else in the folder.
+    let old = dir.join(&rec.launch_target);
+    if old.is_file() {
+        let _ = fs::remove_file(&old);
+    }
+
+    let launch_target = match loader {
+        Loader::Vanilla => download_vanilla(&spec, dir, progress)?,
+        Loader::Paper => download_paper(&spec, dir, progress)?,
+        Loader::Fabric => download_fabric(&spec, dir, progress)?,
+        _ => unreachable!("checked above"),
+    };
+
+    Ok(Created {
+        server_type: loader.server_type(),
+        launch_target,
+        mc_version,
+        dir: rec.path.clone(),
+    })
+}
+
 fn download_bedrock(dir: &Path, progress: &ProgressFn) -> Result<(String, String), String> {
     let version = crate::bedrock::download(dir, progress)?;
     Ok((crate::bedrock::bin_name().to_string(), version))

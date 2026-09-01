@@ -25,6 +25,10 @@ pub struct Schedule {
     pub restart_on_crash: bool,
     /// give up after this many crash-restarts inside the window (default 3)
     pub max_crash_restarts: u32,
+    /// "HH:MM" local — start the server once a day at this time, if it
+    /// isn't already running. Pair with the app-level "stay awake on
+    /// power" setting so the Mac is actually up to notice.
+    pub scheduled_start: Option<String>,
     /// "HH:MM" local — restart once a day at this time
     pub daily_restart: Option<String>,
     /// seconds of in-game warning before the daily restart (default 60)
@@ -53,6 +57,7 @@ pub struct TimedCommand {
 impl Schedule {
     fn is_default(&self) -> bool {
         !self.restart_on_crash
+            && self.scheduled_start.is_none()
             && self.daily_restart.is_none()
             && self.timed_commands.is_empty()
             && !self.backup_on_stop
@@ -105,6 +110,8 @@ fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
 struct DayState {
     /// yyyy-ordinal we last did the daily restart / each timed command
     daily_done: Option<i64>,
+    /// yyyy-ordinal we last did the scheduled start
+    start_done: Option<i64>,
     cmd_done: HashMap<String, i64>,
     /// crash-restart bookkeeping
     crash_count: u32,
@@ -215,6 +222,7 @@ impl Scheduler {
                         serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
                             "text": format!("[scheduler] scheduled backup failed: {e}") }),
                     );
+                    notify_discord_backup_failed(&app, &id);
                 }
             }
         });
@@ -288,6 +296,22 @@ impl Scheduler {
                 ServerStatus::Running | ServerStatus::Starting
             );
 
+            // --- scheduled start (only when it isn't already up) ---
+            if !running {
+                if let Some((h, m)) = sch.scheduled_start.as_deref().and_then(parse_hhmm) {
+                    let target = h as i64 * 60 + m as i64;
+                    if mins >= target && mins < target + 2 && ds.start_done != Some(day) {
+                        ds.start_done = Some(day);
+                        drop(st);
+                        self.console(&rec.id, "scheduled start");
+                        if let Err(e) = procs.start(&rec) {
+                            self.console(&rec.id, &format!("scheduled start failed: {e}"));
+                        }
+                        continue;
+                    }
+                }
+            }
+
             // --- interval backup (independent of backup_on_stop) ---
             if running {
                 if let Some(hours) = sch.interval_backup_hours.filter(|h| *h > 0) {
@@ -353,6 +377,25 @@ impl Scheduler {
     }
 }
 
+/// Only called on backup *failure* — a daily/hourly "backup done" ping for
+/// every server gets old fast and trains people to ignore the channel.
+/// Failure is rare and actually worth knowing about away from the app.
+fn notify_discord_backup_failed(app: &AppHandle, server_id: &str) {
+    let Some(db) = app.try_state::<Db>() else { return };
+    let url = crate::commands::read_app_settings(&db).discord_webhook_url;
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    let name = db
+        .get_server(server_id)
+        .ok()
+        .flatten()
+        .map(|r| r.name)
+        .unwrap_or_else(|| server_id.to_string());
+    crate::discord::notify(url, format!("🟠 **{name}** scheduled backup failed — check the console."));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +405,7 @@ mod tests {
         assert!(Schedule::default().is_default());
         assert!(!Schedule { interval_backup_hours: Some(6), ..Default::default() }.is_default());
         assert!(!Schedule { cloud_backup: true, ..Default::default() }.is_default());
+        assert!(!Schedule { scheduled_start: Some("06:00".into()), ..Default::default() }.is_default());
         // 0 hours is the same as "off", same as None
         assert!(Schedule { interval_backup_hours: Some(0), ..Default::default() }.is_default());
     }

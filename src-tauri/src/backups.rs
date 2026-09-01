@@ -132,7 +132,11 @@ pub fn backup_now(
     Ok(meta)
 }
 
-fn collect_files(dir: &Path) -> Vec<(PathBuf, String)> {
+/// Files worth carrying over when copying a server folder somewhere new —
+/// the same "regenerable junk" filter backups already use. Shared with
+/// `clone.rs`, which is exactly "copy this folder" with a different
+/// destination than a zip.
+pub(crate) fn collect_files(dir: &Path) -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
     for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
         if !e.file_type().is_file() {

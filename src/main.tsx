@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { TitleBar } from "./components/TitleBar";
 import "./index.css";
 
 /**
@@ -21,8 +22,27 @@ root.dataset.os = detectOs();
 // dark-first; a light swap is one attribute away once there's a UI for it
 root.dataset.theme = "dark";
 
+/**
+ * WebView2/WKWebView's default right-click menu ("Back", "Reload",
+ * "Inspect Element"…) is a browser menu, not an app one — it doesn't
+ * belong here. Left on for genuinely editable text (inputs, textareas,
+ * contenteditable, anything explicitly marked selectable) since Cut/Copy/
+ * Paste there is real functionality, not chrome.
+ */
+document.addEventListener("contextmenu", (e) => {
+  const el = e.target as HTMLElement;
+  const editable =
+    el.closest("input, textarea, [contenteditable], [data-selectable]") !== null;
+  if (!editable) e.preventDefault();
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="min-h-0 flex-1">
+        <App />
+      </div>
+    </div>
   </React.StrictMode>,
 );

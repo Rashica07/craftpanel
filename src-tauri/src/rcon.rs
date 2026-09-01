@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const TYPE_AUTH: i32 = 3;
@@ -171,7 +171,14 @@ struct Packet {
 
 /// Keeps one authenticated connection per server and reuses it, so polling
 /// (players, TPS, RAM) doesn't reconnect every few seconds. Reconnects on error.
-pub struct RconPool(Mutex<HashMap<String, RconClient>>);
+///
+/// Each server gets its own inner lock (`Arc<Mutex<Option<RconClient>>>`).
+/// The outer map lock is only ever held for a `HashMap` lookup/insert —
+/// never across a connect or a command round trip — so a slow or hung RCON
+/// call against one server can't delay a command to any other server. (It
+/// used to be one lock shared across every server; this was the real half
+/// of an otherwise-inaccurate lag-spike report, so it's fixed now.)
+pub struct RconPool(Mutex<HashMap<String, Arc<Mutex<Option<RconClient>>>>>);
 
 impl Default for RconPool {
     fn default() -> Self {
@@ -194,23 +201,29 @@ impl RconPool {
         password: &str,
         f: impl Fn(&mut RconClient) -> Result<T>,
     ) -> Result<T> {
-        let mut map = self.0.lock().unwrap();
-        if let Some(c) = map.get_mut(key) {
+        let slot = {
+            let mut map = self.0.lock().unwrap();
+            map.entry(key.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone()
+        };
+        let mut guard = slot.lock().unwrap();
+        if let Some(c) = guard.as_mut() {
             match f(c) {
                 Ok(v) => return Ok(v),
-                Err(_) => {
-                    map.remove(key);
-                }
+                Err(_) => *guard = None,
             }
         }
         let mut c = RconClient::connect((host, port), password)?;
         let v = f(&mut c)?;
-        map.insert(key.to_string(), c);
+        *guard = Some(c);
         Ok(v)
     }
 
     pub fn drop_conn(&self, key: &str) {
-        self.0.lock().unwrap().remove(key);
+        if let Some(slot) = self.0.lock().unwrap().get(key) {
+            *slot.lock().unwrap() = None;
+        }
     }
 }
 

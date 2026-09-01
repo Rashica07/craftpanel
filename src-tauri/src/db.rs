@@ -33,6 +33,16 @@ pub struct ServerRecord {
     pub jvm_args: Option<String>,
 }
 
+/// One background-sampler snapshot — see `metrics_history.rs`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricPoint {
+    pub ts: i64,
+    pub ram_mb: Option<u32>,
+    pub cpu_pct: Option<f32>,
+    pub tps: Option<f32>,
+}
+
 /// Fields the UI supplies when confirming a new server.
 #[derive(Debug, Clone, Deserialize)]
 pub struct NewServer {
@@ -65,7 +75,16 @@ impl Db {
              CREATE TABLE IF NOT EXISTS settings (
                  key   TEXT PRIMARY KEY,
                  value TEXT NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS metric_samples (
+                 server_id TEXT NOT NULL,
+                 ts        INTEGER NOT NULL,
+                 ram_mb    INTEGER,
+                 cpu_pct   REAL,
+                 tps       REAL
+             );
+             CREATE INDEX IF NOT EXISTS idx_metric_samples_server_ts
+                 ON metric_samples(server_id, ts);",
         )?;
         // migrations (idempotent — ignore "duplicate column")
         let _ = conn.execute("ALTER TABLE servers ADD COLUMN sync_code TEXT", []);
@@ -138,6 +157,24 @@ impl Db {
         Ok(())
     }
 
+    /// After swapping a server's jar in place (see `provision::change_version`)
+    /// — updates just the three fields that actually changed, nothing else
+    /// about the server record.
+    pub fn update_server_version(
+        &self,
+        id: &str,
+        server_type: ServerType,
+        mc_version: &str,
+        launch_target: &str,
+    ) -> rusqlite::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE servers SET server_type = ?2, mc_version = ?3, launch_target = ?4 WHERE id = ?1",
+            params![id, type_str(server_type), mc_version, launch_target],
+        )?;
+        Ok(())
+    }
+
     pub fn set_sync_code(&self, id: &str, code: Option<&str>) -> rusqlite::Result<()> {
         let conn = self.0.lock().unwrap();
         conn.execute(
@@ -191,6 +228,51 @@ impl Db {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    // --- metric history (RAM/CPU/TPS over time — see metrics_history.rs) ---
+
+    pub fn insert_metric_sample(
+        &self,
+        server_id: &str,
+        ts: i64,
+        ram_mb: Option<u32>,
+        cpu_pct: Option<f32>,
+        tps: Option<f32>,
+    ) -> rusqlite::Result<()> {
+        self.0.lock().unwrap().execute(
+            "INSERT INTO metric_samples (server_id, ts, ram_mb, cpu_pct, tps)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![server_id, ts, ram_mb, cpu_pct, tps],
+        )?;
+        Ok(())
+    }
+
+    /// Delete every sample older than `cutoff` (unix seconds), across all
+    /// servers — called once per sampler tick, not scheduled separately.
+    pub fn prune_metric_samples(&self, cutoff: i64) -> rusqlite::Result<usize> {
+        self.0
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM metric_samples WHERE ts < ?1", params![cutoff])
+    }
+
+    /// Every sample for `server_id` since `since` (unix seconds), oldest first.
+    pub fn metric_history(&self, server_id: &str, since: i64) -> rusqlite::Result<Vec<MetricPoint>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT ts, ram_mb, cpu_pct, tps FROM metric_samples
+             WHERE server_id = ?1 AND ts >= ?2 ORDER BY ts ASC",
+        )?;
+        let rows = stmt.query_map(params![server_id, since], |r| {
+            Ok(MetricPoint {
+                ts: r.get(0)?,
+                ram_mb: r.get(1)?,
+                cpu_pct: r.get(2)?,
+                tps: r.get(3)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn delete_server(&self, id: &str) -> rusqlite::Result<()> {

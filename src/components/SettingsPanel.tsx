@@ -25,6 +25,7 @@ import { BrandingSection } from "./BrandingSection";
 import { AutomationSection } from "./AutomationSection";
 import { JvmSection } from "./JvmSection";
 import { MgmtSection } from "./MgmtSection";
+import { PluginConfigSection } from "./PluginConfigSection";
 
 type View = "common" | "advanced" | "raw";
 
@@ -304,6 +305,7 @@ export function SettingsPanel({
         <AutomationSection serverId={server.id} />
         <JvmSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
         <MgmtSection serverId={server.id} onNeedsRestart={onNeedsRestart} />
+        <PluginConfigSection serverId={server.id} />
         <ShareSection server={server} onServersChanged={onServersChanged} />
 
         {/* ── server.properties ─────────────────────────────────────── */}

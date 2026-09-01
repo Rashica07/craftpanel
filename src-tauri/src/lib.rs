@@ -6,27 +6,34 @@ mod attribution;
 mod backups;
 mod bedrock;
 mod branding;
+mod clone;
 mod cloud;
 mod commands;
 mod crashreports;
 mod crossplay;
 mod db;
+mod discord;
 mod doctor;
 mod external;
 mod files;
 mod java;
 mod javainstall;
 mod mgmt;
+mod metrics_history;
 mod minecraft;
+mod lock;
 mod modrinth;
 mod mods;
 mod net;
 mod perf;
+mod pluginconfig;
+mod power;
 mod process;
 mod properties;
 mod provision;
 mod r2;
 mod rcon;
+mod remote_api;
 mod schedule;
 mod session;
 mod settings;
@@ -119,6 +126,7 @@ pub fn run() {
 
             let tunnel = TunnelManager::new(app.handle().clone(), &dir);
 
+            app.manage(lock::Lock::new(&dir));
             app.manage(db);
             app.manage(DeviceId(device_id));
             app.manage(procs);
@@ -126,11 +134,32 @@ pub fn run() {
             app.manage(tunnel);
             app.manage(RconPool::new());
 
+            // local/remote management API for the Android companion app —
+            // stays off unless the user already opted in from a previous run
+            let remote_api = remote_api::RemoteApi::new(&dir);
+            if remote_api.status().enabled {
+                if let Err(e) = remote_api.start(app.handle().clone()) {
+                    eprintln!("remote api: failed to auto-start: {e}");
+                }
+            }
+            app.manage(remote_api);
+
             // automation engine (auto-restart, daily restart, timed commands)
             let offset = time::OffsetDateTime::now_local()
                 .map(|d| d.offset().whole_seconds())
                 .unwrap_or(0);
             schedule::Scheduler::new(app.handle().clone(), offset).start();
+
+            // background sampler for RAM/CPU/TPS history graphs
+            metrics_history::MetricsSampler::new(app.handle().clone()).start();
+
+            let power = power::PowerKeeper::new();
+            if commands::read_app_settings(&app.state::<Db>()).stay_awake_on_power {
+                if let Err(e) = power.set_enabled(true) {
+                    eprintln!("stay-awake-on-power: {e}");
+                }
+            }
+            app.manage(power);
 
             // --- tray icon: closing the window while a server runs hides here ---
             let show_i = MenuItem::with_id(app, "show", "Show CraftPanel", true, None::<&str>)?;
@@ -221,6 +250,8 @@ pub fn run() {
             commands::rcon_player_action,
             commands::loader_versions,
             commands::create_server,
+            commands::change_server_version,
+            commands::clone_server,
             commands::modpack_search,
             commands::modpack_info,
             commands::create_server_from_modpack,
@@ -248,6 +279,14 @@ pub fn run() {
             commands::tail_log,
             commands::admin_lists,
             commands::player_history,
+            commands::player_activity,
+            commands::metrics_history,
+            commands::plugin_config_views,
+            commands::set_plugin_config,
+            commands::lock_status,
+            commands::lock_set,
+            commands::lock_check,
+            commands::lock_clear,
             commands::server_icon_status,
             commands::set_server_icon,
             commands::clear_server_icon,
@@ -281,6 +320,7 @@ pub fn run() {
             commands::app_settings_set,
             commands::check_update,
             commands::install_update,
+            commands::discord_test_webhook,
             commands::app_install_id,
             commands::doctor_check,
             commands::crossplay_status,
@@ -304,6 +344,10 @@ pub fn run() {
             commands::cloud_status,
             commands::cloud_finish,
             commands::cloud_unshare,
+            remote_api::remote_api_status,
+            remote_api::remote_api_set_enabled,
+            remote_api::remote_api_regenerate_token,
+            remote_api::remote_api_pair_payload,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

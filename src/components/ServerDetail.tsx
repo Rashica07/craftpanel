@@ -36,12 +36,15 @@ import { AdminPanel } from "./AdminPanel";
 import { WorldsPanel } from "./WorldsPanel";
 import { BrowsePanel } from "./BrowsePanel";
 import { NetworkPanel } from "./NetworkPanel";
-import { PlayerHistory } from "./PlayerHistory";
+import { PlayerActivityChart, PlayerHistory } from "./PlayerHistory";
+import { ServerMetricsHistory } from "./ServerMetricsHistory";
 import { SecuritySection } from "./SecuritySection";
 import { HealthStrip } from "./HealthStrip";
 import { Icon } from "./Icon";
 import { cloudLeaseLabel, leaseLabel } from "./ShareSection";
 import { STATUS_TONE } from "../App";
+import { ChangeVersionModal } from "./ChangeVersionModal";
+import { CloneServerModal } from "./CloneServerModal";
 
 type Tab =
   | "console"
@@ -175,6 +178,7 @@ export function ServerDetail({
   const [eulaOk, setEulaOk] = useState<boolean | null>(null);
   const [showEula, setShowEula] = useState(false);
   const [tab, setTab] = useState<Tab>("console");
+  const [browseQuery, setBrowseQuery] = useState<string | undefined>(undefined);
   const [consoleMode, setConsoleMode] = useState<"live" | "log">("live");
   const [pendingRestart, setPendingRestart] = useState(false);
   const [share, setShare] = useState<ShareView | null>(null);
@@ -184,6 +188,8 @@ export function ServerDetail({
   const [crashDismissed, setCrashDismissed] = useState(false);
   const [suspectDisabled, setSuspectDisabled] = useState(false);
   const [disablingSuspect, setDisablingSuspect] = useState(false);
+  const [showChangeVersion, setShowChangeVersion] = useState(false);
+  const [showClone, setShowClone] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const status = runtime?.status ?? "stopped";
@@ -478,6 +484,18 @@ export function ServerDetail({
                   disabled: !active || busy,
                 },
                 {
+                  icon: "download",
+                  label: "Change version / loader",
+                  run: () => setShowChangeVersion(true),
+                  disabled: active || busy || isBedrock,
+                },
+                {
+                  icon: "copy",
+                  label: "Duplicate server",
+                  run: () => setShowClone(true),
+                  disabled: active || busy,
+                },
+                {
                   icon: "power",
                   label: "Force kill",
                   run: () => run(() => api.killServer(server.id)),
@@ -640,6 +658,19 @@ export function ServerDetail({
                       {suspectDisabled ? "Disabled" : "Disable it"}
                     </Button>
                   )}
+                  {crash?.missingDependency && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="search"
+                      onClick={() => {
+                        setBrowseQuery(crash.missingDependency!.modId);
+                        setTab("browse");
+                      }}
+                    >
+                      Find {crash.missingDependency.modId}
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -659,7 +690,22 @@ export function ServerDetail({
                       {crash.headline}
                     </div>
                   )}
-                  {crash.suspect && (
+                  {crash.missingDependency ? (
+                    <div>
+                      <span className="font-mono text-warn-soft">
+                        {crash.missingDependency.requestedBy}
+                      </span>{" "}
+                      needs{" "}
+                      <span className="font-mono text-warn-soft">
+                        {crash.missingDependency.modId}
+                      </span>
+                      , which isn't installed.
+                      <span className="text-ink-faint">
+                        {" "}
+                        — Add-ons → search will find it.
+                      </span>
+                    </div>
+                  ) : crash.suspect && (
                     <div>
                       Most likely cause:{" "}
                       <span className="font-mono text-warn-soft">
@@ -777,6 +823,8 @@ export function ServerDetail({
               reachable={reachable}
               onNeedsRestart={() => setPendingRestart(true)}
             />
+            <PlayerActivityChart serverId={server.id} />
+            <ServerMetricsHistory serverId={server.id} ramAllocatedMb={server.ram_mb} />
             <PlayerHistory serverId={server.id} />
             <SecuritySection serverId={server.id} />
           </div>
@@ -796,6 +844,7 @@ export function ServerDetail({
             serverId={server.id}
             serverType={server.server_type}
             onNeedsRestart={() => setPendingRestart(true)}
+            initialQuery={browseQuery}
           />
         )}
         {tab === "worlds" && (
@@ -804,7 +853,9 @@ export function ServerDetail({
             locked={active || externalRunning}
           />
         )}
-        {tab === "network" && <NetworkPanel serverId={server.id} />}
+        {tab === "network" && (
+          <NetworkPanel serverId={server.id} serverType={server.server_type} />
+        )}
         {tab === "files" && <FilesPanel serverId={server.id} />}
         {tab === "backups" && (
           <BackupsPanel
@@ -813,6 +864,21 @@ export function ServerDetail({
           />
         )}
       </div>
+
+      {showChangeVersion && (
+        <ChangeVersionModal
+          server={server}
+          onClose={() => setShowChangeVersion(false)}
+          onChanged={() => onServersChanged()}
+        />
+      )}
+      {showClone && (
+        <CloneServerModal
+          server={server}
+          onClose={() => setShowClone(false)}
+          onCloned={() => onServersChanged()}
+        />
+      )}
     </div>
   );
 }
