@@ -1818,6 +1818,41 @@ the real API, confirming the CDN URL and SHA-1 shape rather than guessing
 them), `cargo build --release`, `npx tsc --noEmit`, `npm run build` all
 clean at v2.7.5.
 
+## Batch 31 — visual resource pack finder, scrollbar/UI polish (v2.8.0, 2026-09-02)
+
+- **Bugfix — ResourcePackSection's "Apply" button stayed disabled after an
+  edit.** Its `disabled` expression was needlessly more complex than the
+  established pattern (`AutomationSection`/`JvmSection` both just use
+  `busy || !dirty`) — simplified to `!dirty || !url.trim()`, matching
+  convention. Audited the other staged-save buttons in the app for the same
+  class of bug; the rest already follow the simple pattern.
+- **Resource pack finder, for real this time** — a resource pack is a
+  purely visual choice, so the finder now shows one: bigger clickable
+  thumbnails that open a real screenshot gallery (`modrinth::gallery`, a
+  new on-demand project-detail fetch — not loaded eagerly for a whole page
+  of search results, only for the one pack you click), plus real
+  resolution (8x– through 512x+) and style (vanilla-like/realistic/
+  simplistic/themed/modded) filter chips sourced from Modrinth's actual
+  `resourcepack` category taxonomy — confirmed live against
+  `/v2/tag/category`, not invented.
+- **Scrollbar restyle** — square corners instead of a pill, translucent
+  fill instead of solid, on a fully transparent track; `scrollbar-color`
+  now uses `color-mix()` so it reads as part of the dark UI rather than a
+  bright default bar pasted on top.
+- **Known issue, not fixed:** GitHub flagged a moderate `glib` advisory
+  (GHSA-wrw7-89jp-8q8g). It's a transitive dependency of `tauri` via
+  `gtk 0.18.2` (Linux-only code path — this app doesn't ship a Linux
+  build, so it's not reachable in any binary CraftPanel actually
+  distributes) and hard-pinned by `gtk`'s own `^0.18` requirement —
+  `cargo update -p glib` fails outright, and forcing a mismatched version
+  would just break dependency resolution. Needs an upstream `tauri`/
+  `gtk-rs` bump, not something to hack around locally.
+
+**Verified:** `cargo test` 156 passed (0 failed, 17 ignored — including a
+new live/ignored test confirming `gallery()` returns real
+`cdn.modrinth.com` URLs, not guessed), `cargo build`, `npx tsc --noEmit`,
+`npm run build` all clean at v2.8.0.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.

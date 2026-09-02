@@ -124,7 +124,7 @@ export function ResourcePackSection({
               size="sm"
               icon="check"
               loading={busy}
-              disabled={!url.trim() || (!dirty && !!saved.url)}
+              disabled={!dirty || !url.trim()}
               onClick={apply}
             >
               {busy ? "Downloading & hashing…" : dirty ? "Apply" : "Applied"}

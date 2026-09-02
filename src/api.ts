@@ -447,6 +447,9 @@ export const api = {
   ): Promise<ResourcePackConfig> {
     return invoke("modrinth_install_resourcepack", { id, projectId, prompt, required });
   },
+  modrinthGallery(projectId: string): Promise<string[]> {
+    return invoke("modrinth_gallery", { projectId });
+  },
   modrinthInstalled(id: string): Promise<ModrinthInstalled[]> {
     return invoke("modrinth_installed", { id });
   },

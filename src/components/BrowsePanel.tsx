@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { ModrinthInstalled, ModrinthSearch, ServerType } from "../types";
 import {
@@ -9,6 +10,7 @@ import {
   IconButton,
   Pill,
   Segmented,
+  Spinner,
   StateBlock,
   TextInput,
   Tooltip,
@@ -65,6 +67,27 @@ const CATEGORIES: { id: string; label: string }[] = [
   { id: "game-mechanics", label: "Mechanics" },
   { id: "worldgen", label: "World gen" },
   { id: "adventure", label: "Adventure" },
+];
+
+/**
+ * Real resource-pack categories (confirmed live against `/v2/tag/category`,
+ * filtered to `project_type: "resourcepack"`) — resolution and style are
+ * what actually matters when picking a *look*, not the gameplay categories
+ * above that make sense for mods/plugins instead.
+ */
+const RESOURCEPACK_CATEGORIES: { id: string; label: string }[] = [
+  { id: "8x-", label: "8x-" },
+  { id: "16x", label: "16x" },
+  { id: "32x", label: "32x" },
+  { id: "64x", label: "64x" },
+  { id: "128x", label: "128x" },
+  { id: "256x", label: "256x" },
+  { id: "512x+", label: "512x+" },
+  { id: "vanilla-like", label: "Vanilla-like" },
+  { id: "realistic", label: "Realistic" },
+  { id: "simplistic", label: "Simplistic" },
+  { id: "themed", label: "Themed" },
+  { id: "modded", label: "Modded" },
 ];
 
 /** Not loader-specific — works the same for every Java server type. */
@@ -143,6 +166,21 @@ export function BrowsePanel({
   }, [doSearch, query, ptype, category]);
 
   const [rpRefresh, setRpRefresh] = useState(0);
+  const [preview, setPreview] = useState<{ projectId: string; title: string; images: string[] | null } | null>(
+    null,
+  );
+
+  function previewPack(projectId: string, title: string) {
+    setPreview({ projectId, title, images: null });
+    api
+      .modrinthGallery(projectId)
+      .then((images) =>
+        setPreview((cur) => (cur?.projectId === projectId ? { projectId, title, images } : cur)),
+      )
+      .catch(() =>
+        setPreview((cur) => (cur?.projectId === projectId ? { projectId, title, images: [] } : cur)),
+      );
+  }
 
   async function useAsResourcePack(projectId: string, title: string) {
     setBusy(projectId);
@@ -226,12 +264,12 @@ export function BrowsePanel({
         <ResourcePackSection key={rpRefresh} serverId={serverId} className="mb-3" />
       )}
 
-      {ptype !== "datapack" && ptype !== "resourcepack" && (
+      {ptype !== "datapack" && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <Pill active={category === null} onClick={() => setCategory(null)}>
             All
           </Pill>
-          {CATEGORIES.map((c) => (
+          {(ptype === "resourcepack" ? RESOURCEPACK_CATEGORIES : CATEGORIES).map((c) => (
             <Pill
               key={c.id}
               active={category === c.id}
@@ -270,14 +308,19 @@ export function BrowsePanel({
             title={query.trim() ? `Nothing called "${query}"` : "Nothing in this category"}
             message={
               category
-                ? `No results with the "${CATEGORIES.find((c) => c.id === category)?.label}" filter on. Try "All", or a different search.`
+                ? `No results with the "${(ptype === "resourcepack" ? RESOURCEPACK_CATEGORIES : CATEGORIES).find((c) => c.id === category)?.label}" filter on. Try "All", or a different search.`
                 : "Try a shorter search, or switch between mods and plugins above."
             }
             compact
           />
         ) : (
           <ul className="divide-y divide-line-soft">
-            {res.hits.map((h) => (
+            {res.hits.map((h) => {
+              const resolution =
+                ptype === "resourcepack"
+                  ? RESOURCEPACK_CATEGORIES.find((r) => r.label.includes("x") && h.categories.includes(r.id))
+                  : undefined;
+              return (
               <li
                 key={h.projectId}
                 className={cx(
@@ -285,24 +328,53 @@ export function BrowsePanel({
                   !h.compatible && "opacity-60",
                 )}
               >
-                {h.iconUrl ? (
-                  <img
-                    src={h.iconUrl}
-                    alt=""
-                    loading="lazy"
-                    className="h-11 w-11 shrink-0 rounded-lg border border-line-soft object-cover"
-                  />
-                ) : (
-                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line-soft bg-surface-2 text-ink-ghost">
-                    <Icon name="package" size={18} />
-                  </div>
-                )}
+                {(() => {
+                  const size = ptype === "resourcepack" ? "h-16 w-16" : "h-11 w-11";
+                  const clickable = ptype === "resourcepack";
+                  const content = h.iconUrl ? (
+                    <img
+                      src={h.iconUrl}
+                      alt=""
+                      loading="lazy"
+                      className={cx(size, "shrink-0 rounded-lg border border-line-soft object-cover")}
+                    />
+                  ) : (
+                    <div
+                      className={cx(
+                        size,
+                        "grid shrink-0 place-items-center rounded-lg border border-line-soft bg-surface-2 text-ink-ghost",
+                      )}
+                    >
+                      <Icon name="package" size={18} />
+                    </div>
+                  );
+                  return clickable ? (
+                    <Tooltip label="Preview screenshots">
+                      <button
+                        onClick={() => previewPack(h.projectId, h.title)}
+                        className="group relative shrink-0 overflow-hidden rounded-lg"
+                      >
+                        {content}
+                        <span className="absolute inset-0 grid place-items-center bg-black/0 text-transparent transition-colors group-hover:bg-black/40 group-hover:text-white">
+                          <Icon name="eye" size={16} />
+                        </span>
+                      </button>
+                    </Tooltip>
+                  ) : (
+                    content
+                  );
+                })()}
 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate text-sm font-medium text-ink">
                       {h.title}
                     </span>
+                    {resolution && (
+                      <Badge tone="neutral" size="sm">
+                        {resolution.label}
+                      </Badge>
+                    )}
                     <span className="flex items-center gap-0.5 text-2xs text-ink-faint">
                       <Icon name="download" size={10} />
                       {num(h.downloads)}
@@ -382,7 +454,8 @@ export function BrowsePanel({
                   ) : null}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
@@ -477,6 +550,51 @@ export function BrowsePanel({
           </ul>
         </Card>
       )}
+
+      {preview &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+            onMouseDown={(e) => e.target === e.currentTarget && setPreview(null)}
+          >
+            <div className="cp-in flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-e3">
+              <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                  {preview.title}
+                </span>
+                <IconButton icon="x" title="Close" size="sm" onClick={() => setPreview(null)} />
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {preview.images === null ? (
+                  <div className="flex h-40 items-center justify-center">
+                    <Spinner size={18} />
+                  </div>
+                ) : preview.images.length === 0 ? (
+                  <StateBlock
+                    state="empty"
+                    icon="image"
+                    title="No screenshots"
+                    message="This pack's page doesn't have any gallery images — check its Modrinth page instead."
+                    compact
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {preview.images.map((src) => (
+                      <img
+                        key={src}
+                        src={src}
+                        alt=""
+                        loading="lazy"
+                        className="w-full rounded-lg border border-line-soft"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

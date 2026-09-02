@@ -1638,6 +1638,13 @@ pub fn modrinth_install_resourcepack(
     modrinth::install_resourcepack(&rec.path, &project_id, rec.mc_version.as_deref(), &prompt, required)
 }
 
+/// Doesn't need a server id — Modrinth's gallery is a plain public GET,
+/// nothing here depends on which server is asking.
+#[tauri::command]
+pub fn modrinth_gallery(project_id: String) -> Result<Vec<String>, String> {
+    modrinth::gallery(&project_id)
+}
+
 #[tauri::command]
 pub fn modrinth_installed(db: State<Db>, id: String) -> Result<Vec<InstalledEntry>, String> {
     let rec = load(&db, &id)?;

@@ -315,6 +315,7 @@ pub fn run() {
             commands::modrinth_search,
             commands::modrinth_install,
             commands::modrinth_install_resourcepack,
+            commands::modrinth_gallery,
             commands::modrinth_installed,
             commands::modrinth_check_updates,
             commands::modrinth_update,

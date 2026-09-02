@@ -336,10 +336,15 @@ pre,
   font-feature-settings: "zero" 1;
 }
 
-/* ---- scrollbars: thin, only visible where content actually scrolls ------- */
+/* ---- scrollbars: thin, square, transparent track — only visible where
+   content actually scrolls. Square corners (no border-radius) instead of
+   a pill, and a translucent fill instead of a solid one, so it reads as
+   part of the dark UI instead of a bright OS-default bar pasted on top
+   (the exact look on WebView builds that don't fully honor the styling
+   below — Chromium's own scrollbar-width/scrollbar-color support). ---- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--cp-line-strong) transparent;
+  scrollbar-color: color-mix(in srgb, var(--cp-line-strong) 55%, transparent) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
@@ -349,13 +354,13 @@ pre,
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--cp-line);
+  background-color: color-mix(in srgb, var(--cp-line) 55%, transparent);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 99px;
+  border-radius: 0;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--cp-line-strong);
+  background-color: color-mix(in srgb, var(--cp-line-strong) 75%, transparent);
   background-clip: content-box;
 }
 *::-webkit-scrollbar-corner {

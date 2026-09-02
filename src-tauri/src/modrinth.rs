@@ -135,6 +135,16 @@ struct RawProject {
     title: String,
 }
 
+#[derive(Deserialize)]
+struct RawGalleryImage {
+    url: String,
+}
+#[derive(Deserialize)]
+struct RawProjectDetail {
+    #[serde(default)]
+    gallery: Vec<RawGalleryImage>,
+}
+
 // --- helpers --------------------------------------------------------------
 
 fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T, String> {
@@ -436,6 +446,16 @@ pub fn install_resourcepack(
     crate::resourcepack::set_known(Path::new(server_dir), &file.url, sha1, prompt, required)
 }
 
+/// Real screenshots for one project (compressed `.webp` preview URLs, not
+/// the full-res originals) — a resource pack is a purely visual choice, and
+/// a title + description alone doesn't tell you what it looks like. Fetched
+/// on demand for one pack at a time (a project-detail call, not part of
+/// search results), not eagerly for a whole page of hits.
+pub fn gallery(project_id: &str) -> Result<Vec<String>, String> {
+    let detail: RawProjectDetail = get_json(&format!("{API}/project/{project_id}"))?;
+    Ok(detail.gallery.into_iter().map(|g| g.url).collect())
+}
+
 // --- installed list + updates -----------------------------------------
 
 pub fn installed(server_dir: &str) -> Vec<InstalledEntry> {
@@ -655,5 +675,16 @@ mod tests {
         let saved = crate::resourcepack::read(&d);
         assert_eq!(saved.url, cfg.url);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    // hits the network
+    #[test]
+    #[ignore]
+    fn live_gallery_returns_real_image_urls() {
+        // Faithful 64x — same project used by the resourcepack install test,
+        // known to have gallery images
+        let urls = gallery("r4GILswZ").unwrap();
+        assert!(!urls.is_empty());
+        assert!(urls[0].starts_with("https://cdn.modrinth.com/"));
     }
 }
