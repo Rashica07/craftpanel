@@ -1,0 +1,59 @@
+CraftPanel Custom License
+
+Copyright (c) 2026 kiqa.dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, and modify the Software for personal, non-commercial purposes only, 
+subject to the following conditions and restrictions:
+
+1. ATTRIBUTION REQUIREMENT
+   All copies, modifications, or derivative works must retain the above copyright
+   notice, this license, and a prominent notice indicating that the Software is
+   based on CraftPanel.
+
+2. NON-COMMERCIAL USE ONLY
+   You may not sell, lease, rent, or use the Software (or any derivative works)
+   for any commercial purpose or to generate any form of profit. This includes
+   but is not limited to:
+   - Selling copies of the Software or its code
+   - Offering services that utilize the Software for commercial gain
+   - Using the Software as part of a paid product or service
+   - Any monetization of the Software in any form
+
+3. DESIGN & INTELLECTUAL PROPERTY PROTECTION
+   You may not:
+   - Copy, replicate, or distribute the design, user interface, or visual elements
+     of the Software without explicit written permission
+   - Claim ownership of the Software, its code, or its design
+   - Create or distribute modified versions without clear attribution to the original
+
+4. DISTRIBUTION RESTRICTIONS
+   You may not redistribute, republish, or make the Software available to others
+   (in original or modified form) except:
+   - Through the official CraftPanel repository at https://github.com/Rashica07/craftpanel
+   - With explicit written permission from Rashica07
+   - Under the same terms and restrictions as this license
+
+5. NO REVERSE ENGINEERING RESTRICTIONS (Fair Use)
+   This license permits reverse engineering, decompilation, and disassembly solely
+   for the purpose of understanding the Software for personal, non-commercial use.
+
+6. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+7. TERMINATION
+   If you violate any of the terms of this license, your rights to use the
+   Software are immediately terminated without notice.
+
+8. CONTACT & PERMISSIONS
+   For permissions, commercial licenses, or inquiries, contact: [Your Contact Info]
+
+By using this Software, you agree to be bound by all terms and conditions of
+this license. If you do not agree to these terms, do not use the Software.
