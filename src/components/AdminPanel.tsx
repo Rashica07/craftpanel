@@ -14,6 +14,112 @@ import {
 } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
 
+/**
+ * Operators / Whitelist / Banned all share this shape. Deliberately a
+ * top-level component, not one nested inside `AdminPanel` — a component
+ * defined inside another component's body gets a fresh function identity
+ * every render, so React treats it as a brand-new component type each
+ * time and remounts it from scratch. That was silently destroying and
+ * recreating the "add player" `<input>` on every keystroke (each keystroke
+ * updates `AdminPanel`'s own state, which re-renders it, which used to
+ * redefine `Section` fresh) — the field lost focus after every single
+ * character, which read as "the whole page resets when I type".
+ */
+function Section({
+  title,
+  icon,
+  tone,
+  blurb,
+  items,
+  onRemove,
+  removeLabel,
+  value,
+  onValueChange,
+  onAdd,
+  placeholder,
+  emptyMsg,
+  busy,
+  reachable,
+}: {
+  title: string;
+  icon: string;
+  tone?: "accent" | "ok" | "bad";
+  blurb: string;
+  items: string[];
+  onRemove: (name: string) => void;
+  removeLabel: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  onAdd: () => void;
+  placeholder: string;
+  emptyMsg: string;
+  busy: boolean;
+  reachable: boolean;
+}) {
+  return (
+    <Card
+      title={title}
+      icon={icon}
+      tone={tone}
+      description={blurb}
+      right={<Badge tone="neutral">{items.length}</Badge>}
+      pad={false}
+    >
+      {items.length === 0 ? (
+        <p className="px-3.5 py-3 text-2xs text-ink-faint">{emptyMsg}</p>
+      ) : (
+        <ul className="divide-y divide-line-soft">
+          {items.map((n) => (
+            <li
+              key={n}
+              className="group flex items-center gap-2.5 px-3.5 py-2 transition-colors hover:bg-surface-2"
+            >
+              <span
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold text-ink"
+                style={{
+                  background: `hsl(${
+                    [...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
+                  } 30% 24%)`,
+                }}
+              >
+                {n.slice(0, 2).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                {n}
+              </span>
+              <IconButton
+                icon="x"
+                title={removeLabel}
+                size="sm"
+                disabled={busy || !reachable}
+                className="opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
+                onClick={() => onRemove(n)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-1.5 border-t border-line-soft p-2.5">
+        <TextInput
+          value={value}
+          disabled={!reachable}
+          onChange={(e) => onValueChange(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onAdd()}
+          placeholder={placeholder}
+        />
+        <Button
+          variant="secondary"
+          icon="plus"
+          disabled={busy || !reachable || !value.trim()}
+          onClick={onAdd}
+        >
+          Add
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export function AdminPanel({
   serverId,
   reachable,
@@ -72,96 +178,6 @@ export function AdminPanel({
     }
   }
 
-  /** Operators / Whitelist / Banned all share this shape. */
-  function Section({
-    title,
-    icon,
-    tone,
-    blurb,
-    items,
-    onRemove,
-    removeLabel,
-    addKey,
-    addAction,
-    placeholder,
-    emptyMsg,
-  }: {
-    title: string;
-    icon: string;
-    tone?: "accent" | "ok" | "bad";
-    blurb: string;
-    items: string[];
-    onRemove: (name: string) => void;
-    removeLabel: string;
-    addKey: "op" | "white" | "ban";
-    addAction: PlayerAction;
-    placeholder: string;
-    emptyMsg: string;
-  }) {
-    return (
-      <Card
-        title={title}
-        icon={icon}
-        tone={tone}
-        description={blurb}
-        right={<Badge tone="neutral">{items.length}</Badge>}
-        pad={false}
-      >
-        {items.length === 0 ? (
-          <p className="px-3.5 py-3 text-2xs text-ink-faint">{emptyMsg}</p>
-        ) : (
-          <ul className="divide-y divide-line-soft">
-            {items.map((n) => (
-              <li
-                key={n}
-                className="group flex items-center gap-2.5 px-3.5 py-2 transition-colors hover:bg-surface-2"
-              >
-                <span
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold text-ink"
-                  style={{
-                    background: `hsl(${
-                      [...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360
-                    } 30% 24%)`,
-                  }}
-                >
-                  {n.slice(0, 2).toUpperCase()}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-ink">
-                  {n}
-                </span>
-                <IconButton
-                  icon="x"
-                  title={removeLabel}
-                  size="sm"
-                  disabled={busy || !reachable}
-                  className="opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
-                  onClick={() => onRemove(n)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="flex gap-1.5 border-t border-line-soft p-2.5">
-          <TextInput
-            value={add[addKey]}
-            disabled={!reachable}
-            onChange={(e) => setAdd((st) => ({ ...st, [addKey]: e.target.value }))}
-            onKeyDown={(e) => e.key === "Enter" && act(addAction, add[addKey])}
-            placeholder={placeholder}
-          />
-          <Button
-            variant="secondary"
-            icon="plus"
-            disabled={busy || !reachable || !add[addKey].trim()}
-            onClick={() => act(addAction, add[addKey])}
-          >
-            Add
-          </Button>
-        </div>
-      </Card>
-    );
-  }
-
   if (!lists)
     return (
       <div className="space-y-3">
@@ -215,24 +231,30 @@ export function AdminPanel({
         tone="accent"
         blurb="Trusted players who can run commands and bypass rules."
         items={lists.ops}
-        addKey="op"
-        addAction="op"
+        value={add.op}
+        onValueChange={(v) => setAdd((st) => ({ ...st, op: v }))}
+        onAdd={() => act("op", add.op)}
         placeholder="Username to make an operator"
         removeLabel="Remove operator"
         emptyMsg="Nobody is an operator yet. Add yourself so you can run commands in-game."
         onRemove={(n) => act("deop", n)}
+        busy={busy}
+        reachable={reachable}
       />
       <Section
         title="Whitelist"
         icon="list"
         blurb="The guest list. Only matters while “Whitelist only” is on."
         items={lists.whitelist}
-        addKey="white"
-        addAction="whitelist-add"
+        value={add.white}
+        onValueChange={(v) => setAdd((st) => ({ ...st, white: v }))}
+        onAdd={() => act("whitelist-add", add.white)}
         placeholder="Username to let in"
         removeLabel="Remove from whitelist"
         emptyMsg="Nobody on the list."
         onRemove={(n) => act("whitelist-remove", n)}
+        busy={busy}
+        reachable={reachable}
       />
       <Section
         title="Banned"
@@ -242,12 +264,15 @@ export function AdminPanel({
         items={lists.banned.map((b) =>
           b.reason ? `${b.name} — ${b.reason}` : b.name,
         )}
-        addKey="ban"
-        addAction="ban"
+        value={add.ban}
+        onValueChange={(v) => setAdd((st) => ({ ...st, ban: v }))}
+        onAdd={() => act("ban", add.ban)}
         placeholder="Username to ban"
         removeLabel="Unban"
         emptyMsg="Nobody is banned."
         onRemove={(n) => act("pardon", n.split(" — ")[0])}
+        busy={busy}
+        reachable={reachable}
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />

@@ -1853,6 +1853,37 @@ new live/ignored test confirming `gallery()` returns real
 `cdn.modrinth.com` URLs, not guessed), `cargo build`, `npx tsc --noEmit`,
 `npm run build` all clean at v2.8.0.
 
+## Batch 32 — AdminPanel remount bugfix, chart hover (v2.8.1, 2026-09-02)
+
+- **Bugfix — the "add player" field (Operators/Whitelist/Banned) lost
+  focus after every single keystroke, reading as "the whole page resets
+  when I type."** Root cause: [AdminPanel.tsx](src/components/AdminPanel.tsx)'s
+  `Section` component (the card each of those three lists renders through)
+  was defined *inside* `AdminPanel`'s own render function. A component
+  defined inside another component's body gets a fresh function identity
+  every render — so every keystroke (which updates `AdminPanel`'s own
+  `add` state) redefined `Section` fresh, and React treated it as a
+  brand-new component type each time, remounting it from scratch and
+  destroying the `<input>` DOM node mid-type. Fixed by hoisting `Section`
+  to module scope, taking `value`/`onValueChange`/`onAdd`/`busy`/
+  `reachable` as explicit props instead of closing over `AdminPanel`'s
+  local state. Swept the rest of `src/components/` for the same pattern
+  (a component function defined inside another component's body) —
+  this was the only instance.
+- **Chart hover** — [AreaChart.tsx](src/components/AreaChart.tsx) (the
+  player-activity graph and the RAM/CPU/TPS history graphs both use it)
+  had zero hover interaction at all before this — not a bug in an
+  existing feature, a missing one. Now shows a dashed crosshair, a dot on
+  the line, and a tooltip with the exact value + time at the nearest
+  point.
+- Scrollbar restyle from Batch 31 and the earlier "Use default" GitHub-repo
+  button removal both landed cleanly alongside these — no further changes
+  needed there.
+
+**Verified:** `cargo build --release`, `cargo test` (unaffected —
+frontend-only changes), `npx tsc --noEmit`, `npm run build` all clean at
+v2.8.1.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.

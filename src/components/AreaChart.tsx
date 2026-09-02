@@ -1,9 +1,14 @@
+import { useRef, useState, type CSSProperties } from "react";
+
 /**
  * A small, dependency-free area/line chart — hand-rolled SVG, same spirit
  * as the QR code (`net.rs::qr_svg`): this app doesn't reach for a charting
  * library for one shape of chart. Null values (server wasn't running, or
  * RCON wasn't reachable for that sample) become a real gap in the line,
  * not a drop to zero — a gap tells the truth, zero would lie.
+ *
+ * Hover shows the nearest point's real value + time — a chart you can't
+ * read a specific value off of is just decoration.
  */
 export function AreaChart({
   data,
@@ -21,6 +26,9 @@ export function AreaChart({
   formatValue?: (v: number) => string;
   emptyMessage?: string;
 }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
   const known = data.filter((d): d is { ts: number; value: number } => d.value != null);
 
   if (known.length === 0) {
@@ -71,13 +79,38 @@ export function AreaChart({
   const latest = known[known.length - 1].value;
   const peak = Math.max(...known.map((d) => d.value));
 
+  function nearestKnownIndex(clientX: number): number | null {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return null;
+    const relX = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const ts = minTs + relX * span;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < known.length; i++) {
+      const dist = Math.abs(known[i].ts - ts);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  const hovered = hoverIdx != null ? known[hoverIdx] : null;
+  const hoverXPct = hovered ? (x(hovered.ts) / width) * 100 : 0;
+  // flip the tooltip to the other side near the edges so it doesn't clip
+  const tooltipSide = hoverXPct > 70 ? "right" : "left";
+
   return (
-    <div>
+    <div className="relative">
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
-        className="h-[var(--h)] w-full"
-        style={{ "--h": `${height}px` } as React.CSSProperties}
+        className="h-[var(--h)] w-full cursor-crosshair"
+        style={{ "--h": `${height}px` } as CSSProperties}
+        onMouseMove={(e) => setHoverIdx(nearestKnownIndex(e.clientX))}
+        onMouseLeave={() => setHoverIdx(null)}
       >
         {segments.map((seg, i) => (
           <path key={`a${i}`} d={areaPath(seg)} fill={color} opacity={0.14} />
@@ -94,7 +127,44 @@ export function AreaChart({
             vectorEffect="non-scaling-stroke"
           />
         ))}
+        {hovered && (
+          <>
+            <line
+              x1={x(hovered.ts)}
+              x2={x(hovered.ts)}
+              y1={padTop}
+              y2={padTop + plotH}
+              stroke="var(--cp-line-strong)"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              strokeDasharray="3,3"
+            />
+            <circle
+              cx={x(hovered.ts)}
+              cy={y(hovered.value)}
+              r={3.5}
+              fill={color}
+              stroke="var(--cp-surface)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        )}
       </svg>
+
+      {hovered && (
+        <div
+          className={
+            "pointer-events-none absolute top-0 z-10 -translate-y-full rounded-md border border-line bg-surface-2 px-2 py-1 text-2xs shadow-e2 " +
+            (tooltipSide === "right" ? "-translate-x-full" : "")
+          }
+          style={{ left: `${hoverXPct}%` }}
+        >
+          <div className="font-mono font-medium text-ink">{formatValue(hovered.value)}</div>
+          <div className="text-ink-faint">{new Date(hovered.ts * 1000).toLocaleTimeString()}</div>
+        </div>
+      )}
+
       <div className="mt-1 flex items-center justify-between text-2xs text-ink-faint">
         <span>
           latest <span className="font-mono text-ink-dim">{formatValue(latest)}</span>
