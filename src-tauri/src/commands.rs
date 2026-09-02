@@ -33,6 +33,7 @@ use crate::process::{LogLine, ProcSnapshot, ProcessManager};
 use crate::properties::Properties;
 use crate::provision::{self, CreateSpec, Loader, VersionInfo};
 use crate::rcon::{self, RconClient, RconPool};
+use crate::resourcepack::{self, ResourcePackConfig};
 use crate::cloud::CloudManager;
 use crate::r2::R2Config;
 use crate::settings::{self, ServerSettings};
@@ -214,6 +215,22 @@ pub fn remove_server(
 #[tauri::command]
 pub fn system_info() -> SystemInfo {
     system::info()
+}
+
+/// Where a new server goes if you don't pick a folder yourself —
+/// `~/Documents/CraftPanel Servers`, created on first use. Every "New
+/// server" / "Quick start" flow pre-fills this so most people never have to
+/// deal with a folder picker at all, while still being free to change it
+/// per server.
+#[tauri::command]
+pub fn default_servers_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("couldn't find your Documents folder: {e}"))?;
+    let dir = docs.join("CraftPanel Servers");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 fn load(db: &State<Db>, id: &str) -> Result<ServerRecord, String> {
@@ -1339,6 +1356,32 @@ pub fn world_delete(
     worlds::delete(&rec.path, &name)
 }
 
+// --- resource pack -----------------------------------------------------------
+
+#[tauri::command]
+pub fn get_resource_pack(db: State<Db>, id: String) -> Result<ResourcePackConfig, String> {
+    let rec = load(&db, &id)?;
+    Ok(resourcepack::read(std::path::Path::new(&rec.path)))
+}
+
+#[tauri::command]
+pub fn set_resource_pack(
+    db: State<Db>,
+    id: String,
+    url: String,
+    prompt: String,
+    required: bool,
+) -> Result<ResourcePackConfig, String> {
+    let rec = load(&db, &id)?;
+    resourcepack::set_from_url(std::path::Path::new(&rec.path), &url, &prompt, required)
+}
+
+#[tauri::command]
+pub fn clear_resource_pack(db: State<Db>, id: String) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    resourcepack::clear(std::path::Path::new(&rec.path))
+}
+
 // --- networking: join address, UPnP, QR --------------------------------------
 
 #[derive(Serialize)]
@@ -1584,6 +1627,18 @@ pub fn modrinth_install(
 }
 
 #[tauri::command]
+pub fn modrinth_install_resourcepack(
+    db: State<Db>,
+    id: String,
+    project_id: String,
+    prompt: String,
+    required: bool,
+) -> Result<ResourcePackConfig, String> {
+    let rec = load(&db, &id)?;
+    modrinth::install_resourcepack(&rec.path, &project_id, rec.mc_version.as_deref(), &prompt, required)
+}
+
+#[tauri::command]
 pub fn modrinth_installed(db: State<Db>, id: String) -> Result<Vec<InstalledEntry>, String> {
     let rec = load(&db, &id)?;
     Ok(modrinth::installed(&rec.path))
@@ -1668,8 +1723,6 @@ pub struct AppSettings {
     /// closing / quitting CraftPanel leaves running servers alive
     #[serde(default)]
     pub keep_servers_on_quit: bool,
-    #[serde(default)]
-    pub github_repo: String,
     /// Discord webhook URL — server start/stop/crash and scheduled-backup
     /// notifications post here. Blank = notifications off.
     #[serde(default)]
@@ -1727,15 +1780,13 @@ pub fn doctor_check(
 }
 
 #[tauri::command]
-pub fn check_update(db: State<Db>) -> crate::updater::UpdateCheck {
-    let repo = read_app_settings(&db).github_repo;
-    crate::updater::check(if repo.is_empty() { None } else { Some(&repo) })
+pub fn check_update() -> crate::updater::UpdateCheck {
+    crate::updater::check()
 }
 
 #[tauri::command]
-pub async fn install_update(app: tauri::AppHandle, db: State<'_, Db>) -> Result<(), String> {
-    let repo = read_app_settings(&db).github_repo;
-    crate::updater::install(&app, if repo.is_empty() { None } else { Some(&repo) }).await
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    crate::updater::install(&app).await
 }
 
 /// This install's id — the same value stamped into every server's

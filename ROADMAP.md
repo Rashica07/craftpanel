@@ -1737,11 +1737,16 @@ pasted; `discord.js` v14, zero native deps (`node:sqlite` for leveling,
   optional mod-log embed. Timeout uses native `member.timeout(ms)`.
 - **`/rank show|top`** — MEE6-style, XP curve `100·L²` (spec's), 60s per-user
   cooldown, in-memory cooldown map with a 5-min sweeper.
-- **`events/voiceState.ts`** — Join-to-Create: clone the creator channel, move
-  the member, delete when empty. `reconcileOrphans` on boot cleans up lobbies
-  (recognised by the "💬 " name prefix) left by a previous run.
-- **`events/message.ts`** — automod (configurable regex blacklist + link-spam
-  + mass-mention heuristics; delete + 5s self-destruct warning) then XP.
+- **`events/voiceStateUpdate.ts`** — Join-to-Create: clone the creator channel,
+  move the member, delete when empty. `reconcileOrphans` on boot cleans up
+  lobbies (recognised by the "💬 " name prefix) left by a previous run.
+- **`events/messageCreate.ts`** — automod (configurable regex blacklist +
+  link-spam + mass-mention heuristics; delete + 5s self-destruct warning) then
+  XP.
+- **Event architecture** — `index.ts` scans `events/` at boot and wires each
+  `{ name, once?, execute }` module via `client.on/once` (user asked for the
+  conventional dynamic loader). `events/interactionCreate.ts` is the single
+  funnel for slash commands *and* the verify button.
 - **`monitor.ts`** — 60s `si.cpuTemperature()`/`si.graphics()` poll; over
   threshold (default 85 °C) POSTs an `@owner` webhook embed. Hysteresis +
   cooldown so it doesn't spam; after 3 empty sensor reads it logs once and
@@ -1752,8 +1757,9 @@ pasted; `discord.js` v14, zero native deps (`node:sqlite` for leveling,
   `ensureChannel`/`ensureCategory` instead of blind creates, the destructive
   channel-wipe gated behind an explicit `--wipe` flag + 3s warning, bugs
   fixed (`createRole`→`roles.create`, typo'd comment). The button's runtime
-  half is **`events/verify.ts`** (grants the `Verified` role); button id +
-  role name are shared constants so they can't drift.
+  half lives in `events/interactionCreate.ts` (grants the `Verified` role);
+  button id + role name are shared constants in `src/constants.ts` so the
+  script and the handler can't drift.
 
 **Verified:** `npx tsc --noEmit` clean, `npm run build` clean. Live
 read-only test against the user's running Remote API: `listServers` returned
@@ -1761,6 +1767,56 @@ all 4 servers with correct status/type/version; `getPublicIp` worked;
 leveling DB (add/rank/leaderboard/curve) exercised against a temp SQLite
 file. Discord gateway not exercised (needs a real bot token). Nothing
 committed.
+
+## Batch 30 — Windows titlebar bugfix, default server folder, resource packs (v2.7.5, 2026-09-02)
+
+- **Bugfix — Windows custom titlebar's buttons didn't respond, and the logo
+  showed twice.** [TitleBar.tsx](src/components/TitleBar.tsx)'s outer
+  `data-tauri-drag-region` div wrapped the caption buttons too — Tauri's
+  drag-start listener was grabbing their mousedown before a click could
+  register. Moved the drag region onto its own empty spacer, sibling to
+  the (now separate) button row. Also dropped the titlebar's own logo —
+  the sidebar already shows the CraftPanel wordmark directly below it on
+  Windows, so it was genuinely duplicated.
+- **Default server folder** — `~/Documents/CraftPanel Servers`, created on
+  first use via a new `default_servers_dir` command
+  ([commands.rs](src-tauri/src/commands.rs)). Pre-fills the folder picker
+  in Create/Quick-start/Duplicate; "Change folder…" / "Browse…" still
+  overrides it per server.
+- **"View on Modrinth" link** in Add-ons search results — previously no
+  way to see a mod's actual page before installing.
+- **GitHub repo moved from a per-user Settings field to a compile-time
+  constant** ([updater.rs](src-tauri/src/updater.rs)) — resolved once via
+  `option_env!("CRAFTPANEL_REPO")` at build time (falls back to
+  `Rashica07/craftpanel`), same mechanism the updater signing key already
+  uses in CI. Nobody running CraftPanel should have to know or configure
+  what repo it updates from; a fork sets its own build-time env var
+  instead of a source edit or a GUI field.
+- **Resource packs** — two ways to set one, both writing straight to
+  `server.properties` (`resource-pack`/`resource-pack-sha1`/
+  `resource-pack-prompt`/`require-resource-pack`) via the existing
+  line-preserving `Properties` editor:
+  - **Bring your own** — [resourcepack.rs](src-tauri/src/resourcepack.rs)
+    (new module): paste a direct `.zip` URL, CraftPanel downloads it once
+    just to compute the SHA-1 (never stores the bytes), rejects anything
+    that isn't a real zip or a reachable URL.
+  - **Pick one from Modrinth** — `modrinth.rs` gained `install_resourcepack`,
+    using Modrinth's own `resourcepack` project type (loader `"minecraft"`,
+    confirmed live — not fabric/forge/paper) and reusing the file hash
+    Modrinth already publishes, skipping a second download entirely.
+  - Both live together under a new **"Resource Packs"** category in the
+    Add-ons tab's search-type selector, alongside Mods/Plugins/Datapacks —
+    not buried in the already-dense Settings tab, which is where this
+    first landed before being pulled back out and consolidated here.
+  - Java-only: hidden for Bedrock servers, which use an unrelated
+    folder-based resource-pack system.
+
+**Verified:** `cargo test` 156 passed (0 failed, 16 ignored — including two
+new live/ignored tests: a real download-and-hash against a public zip, and
+a full live Modrinth search → install-as-resource-pack round trip against
+the real API, confirming the CDN URL and SHA-1 shape rather than guessing
+them), `cargo build --release`, `npx tsc --noEmit`, `npm run build` all
+clean at v2.7.5.
 
 ## Other future ideas — sized, not yet scheduled
 

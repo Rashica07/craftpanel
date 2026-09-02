@@ -72,6 +72,12 @@ export function TemplateModal({
     return () => un?.();
   }, []);
 
+  // Same "keep servers in one place" default as the full Create flow —
+  // "Change folder…" below still overrides it.
+  useEffect(() => {
+    api.defaultServersDir().then(setParentDir).catch(() => {});
+  }, []);
+
   async function chooseFolder() {
     const d = await api.pickFolder();
     if (d) setParentDir(d);

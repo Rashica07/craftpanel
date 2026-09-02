@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { ServerRecord } from "../types";
@@ -15,13 +15,25 @@ export function CloneServerModal({
   onCloned: () => void;
 }) {
   const [name, setName] = useState(`${server.name} copy`);
-  const [dir, setDir] = useState("");
+  const [defaultRoot, setDefaultRoot] = useState<string | null>(null);
+  const [customDir, setCustomDir] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    api.defaultServersDir().then(setDefaultRoot).catch(() => {});
+  }, []);
+
+  // Same "keep servers in one place" default as Create/Quick start — the
+  // destination tracks the name until you explicitly pick a folder, then
+  // your choice sticks.
+  const sep = defaultRoot?.includes("\\") ? "\\" : "/";
+  const safeName = name.trim().replace(/[^A-Za-z0-9 _-]/g, "").trim() || "server-copy";
+  const dir = customDir ?? (defaultRoot ? `${defaultRoot}${sep}${safeName.replace(/\s+/g, "-")}` : "");
+
   async function choose() {
     const d = await api.pickFolder();
-    if (d) setDir(d);
+    if (d) setCustomDir(d);
   }
 
   async function clone() {

@@ -16,6 +16,7 @@ import {
 } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
 import { Icon } from "./Icon";
+import { ResourcePackSection } from "./ResourcePackSection";
 
 function num(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -66,8 +67,11 @@ const CATEGORIES: { id: string; label: string }[] = [
   { id: "adventure", label: "Adventure" },
 ];
 
+/** Not loader-specific — works the same for every Java server type. */
+const RESOURCEPACK_TAB = { id: "resourcepack", label: "Resource Packs" };
+
 function typesFor(t: ServerType): { id: string; label: string }[] {
-  if (t === "vanilla") return [{ id: "datapack", label: "Datapacks" }];
+  if (t === "vanilla") return [{ id: "datapack", label: "Datapacks" }, RESOURCEPACK_TAB];
   const primary =
     t === "paper" || t === "spigot"
       ? { id: "mod", label: "Plugins" }
@@ -76,7 +80,7 @@ function typesFor(t: ServerType): { id: string; label: string }[] {
   // into an already-created server never really worked — a pack dictates
   // its own loader + Minecraft version, which can't change after the fact.
   // It's a real create-time flow now (see the wizard's Modpack step).
-  return [primary, { id: "datapack", label: "Datapacks" }];
+  return [primary, { id: "datapack", label: "Datapacks" }, RESOURCEPACK_TAB];
 }
 
 export function BrowsePanel({
@@ -137,6 +141,24 @@ export function BrowsePanel({
     const t = setTimeout(doSearch, query ? 350 : 0);
     return () => clearTimeout(t);
   }, [doSearch, query, ptype, category]);
+
+  const [rpRefresh, setRpRefresh] = useState(0);
+
+  async function useAsResourcePack(projectId: string, title: string) {
+    setBusy(projectId);
+    setError(null);
+    setNote(`Setting ${title} as this server's resource pack…`);
+    try {
+      await api.modrinthInstallResourcePack(serverId, projectId, "", false);
+      setNote(`${title} is now this server's resource pack.`);
+      setRpRefresh((n) => n + 1);
+    } catch (e) {
+      setError(String(e));
+      setNote(null);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function install(projectId: string, title: string) {
     setBusy(projectId);
@@ -200,7 +222,11 @@ export function BrowsePanel({
         </Button>
       </div>
 
-      {ptype !== "datapack" && (
+      {ptype === "resourcepack" && (
+        <ResourcePackSection key={rpRefresh} serverId={serverId} className="mb-3" />
+      )}
+
+      {ptype !== "datapack" && ptype !== "resourcepack" && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <Pill active={category === null} onClick={() => setCategory(null)}>
             All
@@ -230,8 +256,12 @@ export function BrowsePanel({
           <StateBlock
             state="empty"
             icon="search"
-            title="Find mods and plugins"
-            message="Everything here comes from Modrinth, and CraftPanel picks the build that matches your Minecraft version — dependencies included."
+            title={ptype === "resourcepack" ? "Find a resource pack" : "Find mods and plugins"}
+            message={
+              ptype === "resourcepack"
+                ? "Search Modrinth's resource packs — picking one sets it as this server's pack directly, no download or hosting needed on your end."
+                : "Everything here comes from Modrinth, and CraftPanel picks the build that matches your Minecraft version — dependencies included."
+            }
           />
         ) : res.hits.length === 0 ? (
           <StateBlock
@@ -312,8 +342,29 @@ export function BrowsePanel({
                   </p>
                 </div>
 
-                <div className="flex shrink-0 items-center">
-                  {h.installed ? (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Tooltip label="View on Modrinth">
+                    <a
+                      href={`https://modrinth.com/${h.projectType}/${h.slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="grid h-8 w-8 place-items-center rounded-md text-ink-faint transition-colors hover:bg-surface-3 hover:text-ink"
+                    >
+                      <Icon name="external-link" size={14} />
+                    </a>
+                  </Tooltip>
+                  {ptype === "resourcepack" ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="check"
+                      disabled={!!busy}
+                      loading={busy === h.projectId}
+                      onClick={() => useAsResourcePack(h.projectId, h.title)}
+                    >
+                      Use this pack
+                    </Button>
+                  ) : h.installed ? (
                     <Badge tone="ok" icon="check">
                       Installed
                     </Badge>

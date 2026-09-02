@@ -199,6 +199,12 @@ export function CreateServerModal({
   const [packError, setPackError] = useState<string | null>(null);
   const [pickedPack, setPickedPack] = useState<ModpackHit | null>(null);
 
+  // Pre-fill the "keep servers in one place" default so most people never
+  // see a folder picker — "Change folder…" below still overrides it.
+  useEffect(() => {
+    api.defaultServersDir().then(setParentDir).catch(() => {});
+  }, []);
+
   function runPackSearch(query: string) {
     setPackSearching(true);
     setPackError(null);

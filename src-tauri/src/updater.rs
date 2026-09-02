@@ -1,12 +1,15 @@
 //! Lightweight "is there a newer release?" check against GitHub Releases,
 //! plus the real signed auto-install via `tauri-plugin-updater`.
 //!
-//! The endpoint is built at install time (not baked into `tauri.conf.json`)
-//! because the GitHub repo is a per-install setting (`AppSettings.github_repo`)
-//! — different builds of CraftPanel can point at different forks' releases.
+//! The repo is resolved once, at compile time, not read from a per-user
+//! setting — nobody running CraftPanel should ever need to know or care
+//! what repo it updates from. A fork points its own build at itself by
+//! setting the `CRAFTPANEL_REPO` env var before `cargo build` (a CI secret
+//! in their own copy of `.github/workflows/release.yml`, same mechanism as
+//! `TAURI_SIGNING_PRIVATE_KEY` already uses there) — no source edit needed.
 //! CI signs release artifacts and publishes a `latest.json` manifest
-//! alongside them (see `.github/workflows/release.yml`); the public key that
-//! verifies that signature lives in `tauri.conf.json`.
+//! alongside them; the public key that verifies that signature lives in
+//! `tauri.conf.json`.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -26,11 +29,12 @@ pub struct UpdateCheck {
     pub unavailable: Option<String>,
 }
 
-/// CraftPanel's own repo — used whenever no valid override is configured,
-/// so update checks work out of the box instead of silently doing nothing
-/// until someone finds the "GitHub repo" field in Settings and fills it in.
-/// A fork can still point this at itself via that field.
-const DEFAULT_REPO: &str = "Rashica07/craftpanel";
+/// CraftPanel's own repo — baked in at compile time, overridable by setting
+/// `CRAFTPANEL_REPO` before building (see the module doc comment above).
+const DEFAULT_REPO: &str = match option_env!("CRAFTPANEL_REPO") {
+    Some(v) => v,
+    None => "Rashica07/craftpanel",
+};
 
 /// Turns whatever a human typed or pasted into "GitHub repo" — a bare
 /// `owner/repo`, a full `https://github.com/owner/repo` URL, one with a
@@ -65,10 +69,10 @@ fn normalize_repo(input: &str) -> Option<String> {
     }
 }
 
-/// What to actually check/install against: a valid configured override, or
-/// CraftPanel's own repo as a fallback — never "nothing configured".
-fn resolve_repo(repo: Option<&str>) -> String {
-    repo.and_then(normalize_repo).unwrap_or_else(|| DEFAULT_REPO.to_string())
+/// `DEFAULT_REPO`, cleaned up — a defensive pass in case whoever set
+/// `CRAFTPANEL_REPO` pasted a full URL instead of a bare `owner/repo`.
+fn resolved_repo() -> String {
+    normalize_repo(DEFAULT_REPO).unwrap_or_else(|| DEFAULT_REPO.to_string())
 }
 
 fn parse_semver(s: &str) -> (u64, u64, u64) {
@@ -81,9 +85,9 @@ fn parse_semver(s: &str) -> (u64, u64, u64) {
     )
 }
 
-pub fn check(repo: Option<&str>) -> UpdateCheck {
+pub fn check() -> UpdateCheck {
     let current = env!("CARGO_PKG_VERSION").to_string();
-    let repo = resolve_repo(repo);
+    let repo = resolved_repo();
 
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let resp = ureq::get(&url)
@@ -124,8 +128,8 @@ pub fn check(repo: Option<&str>) -> UpdateCheck {
 /// events as it goes. On success the frontend is expected to call the
 /// process plugin's `relaunch()` — this function doesn't restart the app
 /// itself, since a command that never returns is awkward to await from JS.
-pub async fn install(app: &AppHandle, repo: Option<&str>) -> Result<(), String> {
-    let repo = resolve_repo(repo);
+pub async fn install(app: &AppHandle) -> Result<(), String> {
+    let repo = resolved_repo();
 
     let endpoint = format!("https://github.com/{repo}/releases/latest/download/latest.json")
         .parse()
@@ -203,10 +207,8 @@ mod tests {
     }
 
     #[test]
-    fn no_repo_configured_falls_back_to_craftpanels_own() {
-        assert_eq!(resolve_repo(None), DEFAULT_REPO);
-        assert_eq!(resolve_repo(Some("")), DEFAULT_REPO);
-        assert_eq!(resolve_repo(Some("   ")), DEFAULT_REPO);
+    fn resolved_repo_is_default_repo_normalized() {
+        assert_eq!(resolved_repo(), DEFAULT_REPO);
     }
 
     #[test]
@@ -259,18 +261,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_falls_back_when_the_configured_value_is_unusable() {
-        // an empty override, or one that fails to normalize, must not leave
-        // the updater silently doing nothing — it should use CraftPanel's
-        // own repo, same as no override at all
-        assert_eq!(resolve_repo(Some("not a repo")), DEFAULT_REPO);
-        assert_eq!(resolve_repo(Some("someone/fork")), "someone/fork");
-    }
-
-    #[test]
     #[ignore] // hits the network — run explicitly with `cargo test -- --ignored`
     fn live_check_against_craftpanels_own_repo_is_reachable() {
-        let c = check(None);
+        let c = check();
         assert!(c.unavailable.is_none(), "expected a real response: {:?}", c.unavailable);
     }
 }

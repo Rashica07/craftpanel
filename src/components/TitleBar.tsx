@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogoMark } from "./Logo";
 import { Icon } from "./Icon";
 
 /**
@@ -40,17 +39,22 @@ export function TitleBar() {
   const win = getCurrentWindow();
 
   return (
-    <div
-      data-tauri-drag-region
-      onDoubleClick={() => win.toggleMaximize()}
-      className="flex h-8 shrink-0 items-center border-b border-line-soft bg-surface pl-3 text-ink-faint select-none"
-    >
-      <div className="flex flex-1 items-center gap-1.5">
-        <LogoMark size={14} />
-        <span className="font-display text-2xs font-semibold tracking-wide text-ink-dim">
-          CraftPanel
-        </span>
-      </div>
+    <div className="flex h-8 shrink-0 items-center border-b border-line-soft bg-surface text-ink-faint select-none">
+      {/*
+        The drag region — and ONLY the drag region — lives on this empty
+        spacer, not on a wrapper around the caption buttons below. Tauri's
+        drag-region listener grabs the mousedown on anything inside an
+        element carrying the attribute, including descendants, which was
+        swallowing clicks on the buttons before they ever registered
+        (the reported "buttons don't work" bug). No logo/wordmark here
+        either — the sidebar already shows the CraftPanel branding right
+        below this bar; repeating it here just doubled it up.
+      */}
+      <div
+        data-tauri-drag-region
+        onDoubleClick={() => win.toggleMaximize()}
+        className="h-full flex-1"
+      />
       <div className="flex h-full shrink-0 items-stretch">
         <CaptionButton title="Minimize" onClick={() => win.minimize()}>
           <Icon name="minus" size={12} />

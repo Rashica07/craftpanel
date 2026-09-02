@@ -34,6 +34,7 @@ mod provision;
 mod r2;
 mod rcon;
 mod remote_api;
+mod resourcepack;
 mod schedule;
 mod session;
 mod settings;
@@ -231,6 +232,7 @@ pub fn run() {
             commands::list_servers,
             commands::remove_server,
             commands::system_info,
+            commands::default_servers_dir,
             commands::start_server,
             commands::stop_server,
             commands::stop_on_port,
@@ -312,6 +314,7 @@ pub fn run() {
             commands::set_jvm_args,
             commands::modrinth_search,
             commands::modrinth_install,
+            commands::modrinth_install_resourcepack,
             commands::modrinth_installed,
             commands::modrinth_check_updates,
             commands::modrinth_update,
@@ -337,6 +340,9 @@ pub fn run() {
             commands::world_create,
             commands::world_rename,
             commands::world_delete,
+            commands::get_resource_pack,
+            commands::set_resource_pack,
+            commands::clear_resource_pack,
             commands::share_server,
             commands::unshare_server,
             commands::join_shared,

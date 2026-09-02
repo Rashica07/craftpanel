@@ -219,7 +219,11 @@ pub fn search(
         project_type
     };
     let mut facets: Vec<String> = vec![format!("[\"project_type:{search_project_type}\"]")];
-    if project_type != "datapack" {
+    // Resource packs, like datapacks, aren't tied to a mod loader and
+    // aren't "server_side" in the mods sense (confirmed live: filtering by
+    // server_side would wrongly exclude real resource packs, which report
+    // that facet inconsistently or not at all).
+    if project_type != "datapack" && project_type != "resourcepack" {
         facets.push(format!("[\"categories:{lf}\"]"));
         // server-usable only — drop client-only mods (minimaps, Iris, …)
         facets.push("[\"server_side:required\",\"server_side:optional\"]".to_string());
@@ -291,8 +295,14 @@ fn best_version(
     project_type: &str,
 ) -> Result<RawVersion, String> {
     let mut url = format!("{API}/project/{project}/version");
-    // datapacks have loader "datapack"; mods/plugins use the real loader
-    let loaders = if project_type == "datapack" { "datapack" } else { loader };
+    // datapacks have loader "datapack", resource packs have loader
+    // "minecraft" (confirmed live against a real resourcepack project's
+    // version list) — mods/plugins use the real loader
+    let loaders = match project_type {
+        "datapack" => "datapack",
+        "resourcepack" => "minecraft",
+        _ => loader,
+    };
     url.push_str(&format!("?loaders=[\"{loaders}\"]"));
     if let Some(v) = mc_version {
         url.push_str(&format!("&game_versions=[\"{v}\"]"));
@@ -402,6 +412,28 @@ pub fn install(
 
     write_manifest(dir, &manifest)?;
     Ok(InstallResult { installed, skipped })
+}
+
+/// Set a Modrinth resource pack as this server's pack — unlike `install()`,
+/// this never touches the mods/plugins folder or the install manifest.
+/// Modrinth's own version files already carry a SHA-1, so this skips
+/// downloading the zip a second time just to re-hash it — the URL + hash go
+/// straight into `server.properties` via `resourcepack::set_known`.
+pub fn install_resourcepack(
+    server_dir: &str,
+    project_id: &str,
+    mc_version: Option<&str>,
+    prompt: &str,
+    required: bool,
+) -> Result<crate::resourcepack::ResourcePackConfig, String> {
+    let ver = best_version(project_id, "minecraft", mc_version, "resourcepack")?;
+    let file = primary_file(&ver).ok_or("That pack's version has no file.")?;
+    let sha1 = file
+        .hashes
+        .sha1
+        .as_deref()
+        .ok_or("Modrinth didn't publish a hash for that file.")?;
+    crate::resourcepack::set_known(Path::new(server_dir), &file.url, sha1, prompt, required)
 }
 
 // --- installed list + updates -----------------------------------------
@@ -592,6 +624,36 @@ mod tests {
         let jars: Vec<_> = fs::read_dir(d.join("mods")).unwrap().flatten().collect();
         assert!(jars.len() >= 2, "REI + its deps should land in mods/");
         assert!(installed(&d.to_string_lossy()).len() >= 2);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // hits the network
+    #[test]
+    #[ignore]
+    fn live_install_resourcepack_from_search() {
+        let d = std::env::temp_dir().join("cp-mr-rp");
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("server.properties"), "level-name=world\n").unwrap();
+
+        let hit = search(&d.to_string_lossy(), ServerType::Paper, "faithful", "resourcepack", None, Some("1.21.1"), 0)
+            .unwrap()
+            .hits
+            .into_iter()
+            .next()
+            .expect("at least one resourcepack hit");
+
+        let cfg = install_resourcepack(&d.to_string_lossy(), &hit.project_id, Some("1.21.1"), "Optional pack", false).unwrap();
+        assert!(cfg.url.starts_with("https://cdn.modrinth.com/"));
+        assert_eq!(cfg.sha1.len(), 40);
+
+        // nothing was dropped into mods/ or tracked in the mod manifest —
+        // this is a server.properties change, not a mod install
+        assert!(!d.join("mods").exists());
+        assert!(installed(&d.to_string_lossy()).is_empty());
+
+        let saved = crate::resourcepack::read(&d);
+        assert_eq!(saved.url, cfg.url);
         let _ = fs::remove_dir_all(&d);
     }
 }

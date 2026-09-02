@@ -48,6 +48,7 @@ import type {
   RconSettings,
   RemoteApiStatus,
   RconSetupResult,
+  ResourcePackConfig,
   Schedule,
   ServerRecord,
   ServerSettings,
@@ -65,6 +66,12 @@ export const api = {
     return open({ directory: true, multiple: false, title: "Select server folder" }) as Promise<
       string | null
     >;
+  },
+  /** ~/Documents/CraftPanel Servers, created on first use — the default
+   * parent folder new-server flows pre-fill so most people never see a
+   * folder picker unless they want one. */
+  defaultServersDir(): Promise<string> {
+    return invoke("default_servers_dir");
   },
   detectServer(path: string): Promise<DetectionResult> {
     return invoke("detect_server", { path });
@@ -432,6 +439,14 @@ export const api = {
   ): Promise<ModrinthInstallResult> {
     return invoke("modrinth_install", { id, projectId, projectType });
   },
+  modrinthInstallResourcePack(
+    id: string,
+    projectId: string,
+    prompt: string,
+    required: boolean,
+  ): Promise<ResourcePackConfig> {
+    return invoke("modrinth_install_resourcepack", { id, projectId, prompt, required });
+  },
   modrinthInstalled(id: string): Promise<ModrinthInstalled[]> {
     return invoke("modrinth_installed", { id });
   },
@@ -539,6 +554,17 @@ export const api = {
   },
   worldDelete(id: string, name: string): Promise<void> {
     return invoke("world_delete", { id, name });
+  },
+
+  // resource pack
+  getResourcePack(id: string): Promise<ResourcePackConfig> {
+    return invoke("get_resource_pack", { id });
+  },
+  setResourcePack(id: string, url: string, prompt: string, required: boolean): Promise<ResourcePackConfig> {
+    return invoke("set_resource_pack", { id, url, prompt, required });
+  },
+  clearResourcePack(id: string): Promise<void> {
+    return invoke("clear_resource_pack", { id });
   },
 
   // multi-device sharing

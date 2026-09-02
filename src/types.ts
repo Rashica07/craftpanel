@@ -337,7 +337,6 @@ export interface AppSettings {
   defaultRamMb: number;
   expertMode: boolean;
   keepServersOnQuit: boolean;
-  githubRepo: string;
   discordWebhookUrl: string;
   stayAwakeOnPower: boolean;
 }
@@ -469,6 +468,15 @@ export interface ServerSettings {
 export interface ApplyResult {
   changed: string[];
   restartRequired: boolean;
+}
+
+/** Java-edition only — Bedrock's resource packs are a folder next to the
+ * world, not a URL. See `hasNoRcon` for the same kind of platform gate. */
+export interface ResourcePackConfig {
+  url: string;
+  sha1: string;
+  prompt: string;
+  required: boolean;
 }
 
 export interface Backup {

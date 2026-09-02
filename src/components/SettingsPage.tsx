@@ -33,7 +33,6 @@ const DEFAULTS: AppSettings = {
   defaultRamMb: 4096,
   expertMode: false,
   keepServersOnQuit: false,
-  githubRepo: "",
   discordWebhookUrl: "",
   stayAwakeOnPower: false,
 };
@@ -52,27 +51,11 @@ const TABS: TabDef[] = [
 
 const JAVA_FEATURES = [17, 21, 25] as const;
 
-/** CraftPanel's own repo — mirrors the fallback baked into `updater.rs`, so
- *  update checks work with this field left blank, not just after typing
- *  something in. */
+/** CraftPanel's own repo — resolved once at compile time on the Rust side
+ *  (`updater::DEFAULT_REPO`, overridable per-build via the `CRAFTPANEL_REPO`
+ *  env var, not a per-user setting). Mirrored here just for the About
+ *  link's `href`. */
 const DEFAULT_REPO = "Rashica07/craftpanel";
-
-/** Same normalization as `updater::normalize_repo` on the Rust side — turns
- *  a pasted full URL (or one with a stray "github.com/" still stuck on the
- *  front) into a clean "owner/repo", or null if it still doesn't look like
- *  one. Applied on blur so the About link and update checks never end up
- *  pointed at "github.com/github.com/owner/repo". */
-function normalizeRepo(input: string): string | null {
-  let s = input.trim();
-  s = s.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
-  while (/^github\.com\//i.test(s)) s = s.slice("github.com/".length);
-  s = s.replace(/\/+$/, "").replace(/\.git$/i, "");
-  const parts = s.split("/");
-  if (parts.length !== 2) return null;
-  const [owner, repo] = parts;
-  const valid = (p: string) => p.length > 0 && /^[A-Za-z0-9._-]+$/.test(p);
-  return valid(owner) && valid(repo) ? `${owner}/${repo}` : null;
-}
 
 /**
  * The app's own settings, promoted from a cramped modal to a full page —
@@ -162,7 +145,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
         )}
         {visited.has("updates") && (
           <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "updates" && "hidden")}>
-            <UpdatesTab s={s} set={set} onDirtySave={dirty ? save : undefined} />
+            <UpdatesTab />
           </div>
         )}
         {visited.has("java") && (
@@ -182,7 +165,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
         )}
         {visited.has("about") && (
           <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "about" && "hidden")}>
-            <AboutTab githubRepo={s.githubRepo} />
+            <AboutTab />
           </div>
         )}
       </div>
@@ -316,15 +299,7 @@ function DiscordCard({
 
 /* ─────────────────────────────── Updates ──────────────────────────────── */
 
-function UpdatesTab({
-  s,
-  set,
-  onDirtySave,
-}: {
-  s: AppSettings;
-  set: <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => void;
-  onDirtySave?: () => Promise<void>;
-}) {
+function UpdatesTab() {
   const [upd, setUpd] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -340,7 +315,6 @@ function UpdatesTab({
   async function check() {
     setChecking(true);
     try {
-      if (onDirtySave) await onDirtySave();
       setUpd(await api.checkUpdate());
     } finally {
       setChecking(false);
@@ -364,22 +338,8 @@ function UpdatesTab({
     <Card
       title="Updates"
       icon="download"
-      description="Checks and installs releases from CraftPanel's own GitHub repo — only set this if you're running a fork and want it to update from yours instead."
+      description={`Checks and installs releases from ${DEFAULT_REPO}.`}
     >
-      <Field label="GitHub repo" hint={`Leave blank to use ${DEFAULT_REPO}. Pasting a full github.com URL is fine — it gets cleaned up.`}>
-        <TextInput
-          value={s.githubRepo}
-          onChange={(e) => set("githubRepo", e.target.value)}
-          onBlur={(e) => {
-            const v = e.target.value.trim();
-            if (!v) return;
-            const normalized = normalizeRepo(v);
-            if (normalized && normalized !== v) set("githubRepo", normalized);
-          }}
-          placeholder={DEFAULT_REPO}
-        />
-      </Field>
-
       {installed ? (
         <div className="mt-3 flex items-center gap-2 border-t border-line-soft pt-3 text-2xs font-medium text-ok">
           <Icon name="check-circle" size={13} />
@@ -733,14 +693,14 @@ function DiagnosticsTab() {
 
 /* ──────────────────────────────── About ───────────────────────────────── */
 
-function AboutTab({ githubRepo }: { githubRepo: string }) {
+function AboutTab() {
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
     api.checkUpdate().then((u) => setVersion(u.current)).catch(() => {});
   }, []);
 
-  const repo = (githubRepo.trim() && normalizeRepo(githubRepo)) || DEFAULT_REPO;
+  const repo = DEFAULT_REPO;
 
   return (
     <Card title="CraftPanel" icon="info">

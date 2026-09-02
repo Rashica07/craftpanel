@@ -380,14 +380,19 @@ mod tests {
             today_ids.push(meta.id);
         }
 
-        // 2 snapshots each on two older days (5 and 6 days ago) — should thin to 1/day
+        // 2 snapshots each on two older days (5 and 6 days ago) — should thin to 1/day.
+        // Anchored to noon UTC on each target day (not "now minus N hours") so the
+        // pair can never straddle a UTC day boundary depending on what time the
+        // test happens to run — that was flaky right at the boundary itself.
+        let now_day_start = now.div_euclid(86400) * 86400;
         let mut older_kept = Vec::new();
         for day_offset in [5i64, 6i64] {
+            let day_noon = now_day_start - day_offset * 86400 + 12 * 3600;
             let mut best = None;
             for j in 0..2 {
                 let s = snapshot_now(&d, "scheduled", &noop).unwrap();
                 let mut meta = s.clone();
-                meta.created_at = now - day_offset * 86400 - j * 3600;
+                meta.created_at = day_noon - j * 3600; // still hours apart, same day bucket
                 write_sidecar(&root, &meta).unwrap();
                 if j == 0 {
                     best = Some(meta.id.clone()); // j=0 is the newer (larger created_at) of the pair
