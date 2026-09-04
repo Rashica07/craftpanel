@@ -23,6 +23,10 @@ const FIRST_BOOT_TIMEOUT: Duration = Duration::from_secs(240);
 pub enum Loader {
     Vanilla,
     Paper,
+    /// Unlike every other loader here, there's no downloadable jar —
+    /// Spigot's license requires everyone to compile their own via
+    /// Mojang/Spigot's own `BuildTools.jar`. See [`build_spigot`].
+    Spigot,
     Fabric,
     Neoforge,
     Forge,
@@ -36,6 +40,7 @@ impl Loader {
         match self {
             Loader::Vanilla => ServerType::Vanilla,
             Loader::Paper => ServerType::Paper,
+            Loader::Spigot => ServerType::Spigot,
             Loader::Fabric => ServerType::Fabric,
             // NeoForge is detected/stored as Forge for now (see ROADMAP).
             Loader::Neoforge | Loader::Forge => ServerType::Forge,
@@ -102,6 +107,7 @@ pub fn list_versions(loader: Loader) -> Result<Vec<VersionInfo>, String> {
     match loader {
         Loader::Vanilla => mojang_versions(),
         Loader::Paper => paper_versions(),
+        Loader::Spigot => spigot_versions(),
         Loader::Fabric => fabric_game_versions(),
         Loader::Neoforge => neoforge_versions(),
         Loader::Forge => forge_versions(),
@@ -151,7 +157,42 @@ fn paper_versions() -> Result<Vec<VersionInfo>, String> {
             }
         }
     }
+    // `families` is a `serde_json::Map` keyed by version family (e.g.
+    // "1.20", "1.21") — iterating `.values()` walks those families in
+    // whatever order the map happens to store them (insertion/hash
+    // order, not numeric order), so without this the picker showed e.g.
+    // the 1.16 family after the 1.21 one. Sort every version explicitly,
+    // newest first, the same way every other version list in this file
+    // already reads (Mojang's own manifest, Fabric's, NeoForge's).
+    out.sort_by(|a, b| mc_version_key(&b.id).cmp(&mc_version_key(&a.id)));
     Ok(out)
+}
+
+/// Turns "1.21.1" / "1.8.9" / "1.21" into `(21, 1)`-style tuples so
+/// Minecraft version strings compare numerically instead of
+/// lexicographically (where "1.9" would wrongly sort after "1.10").
+/// Handles the trailing `-` snapshot suffix Paper's own ids sometimes
+/// carry (e.g. "1.21.4-rc1") by comparing on the numeric prefix alone.
+fn mc_version_key(id: &str) -> Vec<u32> {
+    id.split(['-', '+'])
+        .next()
+        .unwrap_or(id)
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0))
+        .collect()
+}
+
+/// There's no version-listing API for Spigot the way there is for Paper —
+/// BuildTools just takes `--rev <mc_version>` and attempts to build
+/// whatever you ask for. Reuses Mojang's own manifest (already correctly
+/// ordered) filtered to 1.8+, since that's the reboot point after the
+/// 2014 Bukkit/Spigot DMCA affair — everything before it is effectively
+/// unsupported by BuildTools today and would just fail the build.
+fn spigot_versions() -> Result<Vec<VersionInfo>, String> {
+    Ok(mojang_versions()?
+        .into_iter()
+        .filter(|v| v.kind == "release" && mc_version_key(&v.id) >= vec![1, 8])
+        .collect())
 }
 
 fn fabric_game_versions() -> Result<Vec<VersionInfo>, String> {
@@ -220,6 +261,7 @@ pub fn create(spec: &CreateSpec, progress: &ProgressFn) -> Result<Created, Strin
     let (server_type, launch_target) = match spec.loader {
         Loader::Vanilla => (ServerType::Vanilla, download_vanilla(spec, dir, progress)?),
         Loader::Paper => (ServerType::Paper, download_paper(spec, dir, progress)?),
+        Loader::Spigot => (ServerType::Spigot, build_spigot(spec, dir, &java, progress)?),
         Loader::Fabric => (ServerType::Fabric, download_fabric(spec, dir, progress)?),
         Loader::Neoforge | Loader::Forge => {
             (spec.loader.server_type(), run_installer(spec, dir, &java, progress)?)
@@ -545,6 +587,139 @@ fn run_installer(
     } else {
         Err("installer finished but produced no run script or args file".into())
     }
+}
+
+/// Spigot ships no downloadable server jar anywhere — its license requires
+/// everyone to compile their own via Mojang/Spigot's own `BuildTools.jar`
+/// (downloads Minecraft + Bukkit/CraftBukkit/Spigot source, then Maven-
+/// builds it). Real multi-minute compile, not a download — the exact
+/// tradeoff flagged to and accepted by the user before this was built.
+///
+/// `--compile SPIGOT` skips the CraftBukkit build entirely (BuildTools
+/// otherwise compiles both by default) since nothing here ever launches
+/// a CraftBukkit jar — meaningfully faster and lighter for no loss.
+fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn) -> Result<String, String> {
+    const BUILD_TIMEOUT: Duration = Duration::from_secs(25 * 60);
+
+    // Fail fast, before downloading anything — BuildTools needs `git` on
+    // PATH and will otherwise fail deep into the build with a much more
+    // confusing error.
+    if Command::new("git").arg("--version").output().is_err() {
+        return Err("BuildTools needs git installed to compile Spigot — on macOS, run `xcode-select --install` (or install Xcode) to get it, then try again.".into());
+    }
+
+    let work = dir.join(".buildtools");
+    fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let jar_path = work.join("BuildTools.jar");
+    download_to(
+        "https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar",
+        &jar_path,
+        "BuildTools",
+        progress,
+    )?;
+
+    progress(Progress {
+        stage: "build".into(),
+        message: format!("Compiling Spigot {} via BuildTools — this takes several minutes…", spec.mc_version),
+        pct: None,
+    });
+
+    let result = (|| -> Result<String, String> {
+        let mut child = Command::new(java)
+            .current_dir(&work)
+            .args(["-jar", "BuildTools.jar", "--rev", &spec.mc_version, "--output-dir"])
+            .arg(dir)
+            .args(["--compile", "SPIGOT"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("couldn't launch BuildTools (is Java installed and on PATH?): {e}"))?;
+
+        // Both streams feed one channel — BuildTools/Maven mix real
+        // progress and errors across stdout/stderr, and the timeout loop
+        // below only needs "is it still saying something," not which
+        // stream it came from.
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        for stream in [child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>)]
+            .into_iter()
+            .flatten()
+        {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stream);
+                for line in reader.lines().map_while(Result::ok) {
+                    if tx.send(line).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let started = Instant::now();
+        let mut last_line = String::new();
+        let mut last_report = Instant::now() - Duration::from_secs(10);
+        loop {
+            if started.elapsed() > BUILD_TIMEOUT {
+                let _ = child.kill();
+                return Err(format!(
+                    "BuildTools didn't finish within {} minutes — either a very slow connection or it's stuck. Last line seen: {last_line}",
+                    BUILD_TIMEOUT.as_secs() / 60
+                ));
+            }
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(line) => {
+                    last_line = line;
+                    if last_report.elapsed() >= Duration::from_secs(2) {
+                        last_report = Instant::now();
+                        progress(Progress {
+                            stage: "build".into(),
+                            message: format!(
+                                "Compiling Spigot via BuildTools… {}m{}s elapsed — {}",
+                                started.elapsed().as_secs() / 60,
+                                started.elapsed().as_secs() % 60,
+                                last_line.chars().take(100).collect::<String>()
+                            ),
+                            pct: None,
+                        });
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if let Ok(Some(_)) = child.try_wait() {
+                        break;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!(
+                "BuildTools failed (make sure you have a full JDK, not just a JRE, and a working internet connection). Last line seen: {last_line}"
+            ));
+        }
+
+        // `--output-dir <dir>` makes BuildTools copy the finished jar
+        // straight into the server folder — find whatever it actually
+        // named it rather than guessing the exact filename.
+        let jar = fs::read_dir(dir)
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                let name = e.file_name().to_string_lossy().to_lowercase();
+                name.starts_with("spigot-") && name.ends_with(".jar")
+            })
+            .ok_or("BuildTools finished but no spigot-*.jar showed up in the server folder")?;
+        Ok(jar.file_name().to_string_lossy().into_owned())
+    })();
+
+    // BuildTools' own work dir (decompiled sources, Maven's local repo
+    // copy, etc.) can run into the hundreds of MB to 1GB+ — always clean
+    // it up, success or failure, rather than leaving it sitting in what's
+    // supposed to be a plain server folder.
+    let _ = fs::remove_dir_all(&work);
+    result
 }
 
 fn first_boot(
@@ -922,7 +1097,7 @@ pub fn create_from_modpack(spec: &ModpackSpec, progress: &ProgressFn) -> Result<
         Loader::Neoforge | Loader::Forge => {
             (loader.server_type(), run_installer(&sub_spec, dir, &java, progress)?)
         }
-        Loader::Paper | Loader::Bedrock => unreachable!("never derived from mrpack dependencies"),
+        Loader::Paper | Loader::Spigot | Loader::Bedrock => unreachable!("never derived from mrpack dependencies"),
     };
 
     progress(Progress { stage: "eula".into(), message: "Accepting the Minecraft EULA".into(), pct: None });
@@ -974,6 +1149,26 @@ mod tests {
     fn loader_maps_to_server_type() {
         assert_eq!(Loader::Paper.server_type(), ServerType::Paper);
         assert_eq!(Loader::Neoforge.server_type(), ServerType::Forge);
+    }
+
+    /// Regression for the real ordering bug: Paper's own API groups
+    /// versions by family in a `serde_json` map, whose iteration order
+    /// isn't numeric — sorting by this key is what puts the whole list
+    /// back in newest-first order regardless of what order the API
+    /// happened to hand families back in.
+    #[test]
+    fn mc_version_key_orders_numerically_not_lexicographically() {
+        let mut ids = vec!["1.9", "1.21.1", "1.10", "1.8.9", "1.21", "1.16.5"];
+        ids.sort_by(|a, b| mc_version_key(b).cmp(&mc_version_key(a)));
+        assert_eq!(ids, vec!["1.21.1", "1.21", "1.16.5", "1.10", "1.9", "1.8.9"]);
+    }
+
+    #[test]
+    fn mc_version_key_handles_snapshot_suffixes() {
+        // "1.21.4-rc1" must sort as 1.21.4, not get stuck comparing the
+        // literal string "-rc1".
+        assert!(mc_version_key("1.21.4-rc1") == mc_version_key("1.21.4"));
+        assert!(mc_version_key("1.21.4") > mc_version_key("1.21"));
     }
 
     #[test]
@@ -1071,10 +1266,19 @@ mod tests {
     #[test]
     #[ignore]
     fn lists_every_loader() {
-        for l in [Loader::Vanilla, Loader::Paper, Loader::Fabric, Loader::Neoforge, Loader::Forge] {
+        for l in [Loader::Vanilla, Loader::Paper, Loader::Spigot, Loader::Fabric, Loader::Neoforge, Loader::Forge] {
             let v = list_versions(l).unwrap_or_else(|e| panic!("{l:?}: {e}"));
             assert!(!v.is_empty(), "{l:?} returned no versions");
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn spigot_versions_are_releases_from_1_8_onward() {
+        let v = list_versions(Loader::Spigot).unwrap();
+        assert!(v.iter().all(|x| x.kind == "release"));
+        assert!(v.iter().all(|x| mc_version_key(&x.id) >= vec![1, 8]));
+        assert!(v.iter().any(|x| x.id == "1.21.1" || x.id.starts_with("1.21")));
     }
 
     /// Full end-to-end: download + first-boot a real Paper server, enable RCON,

@@ -1,15 +1,15 @@
-//! A pre-flight health check: Java, disk space, port availability, and (if
-//! configured) R2 credentials — everything that would otherwise surface as a
-//! confusing error the moment someone tries to create or start a server.
-//! One button in Settings, run all four, tell the admin what's wrong
-//! *before* it becomes a failure instead of explaining it after.
+//! A pre-flight health check: Java, disk space, and port availability —
+//! everything that would otherwise surface as a confusing error the
+//! moment someone tries to create or start a server. One button in
+//! Settings, run all three, tell the admin what's wrong *before* it
+//! becomes a failure instead of explaining it after.
 
 use std::path::Path;
 
 use serde::Serialize;
 use sysinfo::Disks;
 
-use crate::{cloud::CloudManager, db::Db, external, java};
+use crate::{db::Db, external, java};
 
 const MIN_FREE_GB: u64 = 2;
 
@@ -107,31 +107,8 @@ fn check_port(db: &Db) -> DoctorCheck {
     }
 }
 
-fn check_r2(cloud: &CloudManager) -> Option<DoctorCheck> {
-    if !cloud.is_configured() {
-        return None; // opt-in feature, not set up — not a problem worth reporting
-    }
-    Some(match cloud.check() {
-        Ok(()) => DoctorCheck {
-            id: "r2",
-            label: "Cloud sync (R2)".into(),
-            ok: true,
-            detail: "Connected.".into(),
-        },
-        Err(e) => DoctorCheck {
-            id: "r2",
-            label: "Cloud sync (R2)".into(),
-            ok: false,
-            detail: e,
-        },
-    })
-}
-
-pub fn run(db: &Db, cloud: &CloudManager, app_data_dir: &Path) -> DoctorReport {
-    let mut checks = vec![check_java(), check_disk(app_data_dir), check_port(db)];
-    if let Some(r2) = check_r2(cloud) {
-        checks.push(r2);
-    }
+pub fn run(db: &Db, app_data_dir: &Path) -> DoctorReport {
+    let checks = vec![check_java(), check_disk(app_data_dir), check_port(db)];
     let all_ok = checks.iter().all(|c| c.ok);
     DoctorReport { checks, all_ok }
 }

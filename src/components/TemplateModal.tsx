@@ -94,12 +94,29 @@ export function TemplateModal({
     try {
       setStage("Downloading Paper…");
       const versions = await api.loaderVersions("paper");
-      const latest = versions.find((v) => v.kind === "release")?.id ?? versions[0]?.id;
-      if (!latest) throw new Error("Couldn't find a Paper build to install.");
+      let mcVersion = versions.find((v) => v.kind === "release")?.id ?? versions[0]?.id;
+      if (!mcVersion) throw new Error("Couldn't find a Paper build to install.");
+
+      if (template.plugin) {
+        // Pick the newest Paper version this template's plugin actually
+        // has a published build for, instead of blindly grabbing the
+        // newest Paper release and hoping the plugin caught up to it —
+        // that's the real bug that made Skyblock fail every time Iridium
+        // Skyblock hadn't published a build for whatever was newest yet.
+        setStage(`Checking ${template.plugin.name} compatibility…`);
+        const supported = new Set(await api.modrinthSupportedVersions(template.plugin.slug, "spigot"));
+        const match = versions.find((v) => supported.has(v.id));
+        if (!match) {
+          throw new Error(
+            `${template.plugin.name} doesn't have a build for any currently available Paper version yet.`,
+          );
+        }
+        mcVersion = match.id;
+      }
 
       const rec = await api.createServer({
         loader: "paper",
-        mc_version: latest,
+        mc_version: mcVersion,
         loader_version: null,
         dir,
         name: safeName,

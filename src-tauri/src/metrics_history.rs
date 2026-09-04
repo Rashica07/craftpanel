@@ -11,8 +11,7 @@
 //! accurate critique made about a *different*, already-lightweight part of
 //! this app a few batches ago).
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager};
@@ -26,8 +25,6 @@ const TICK: Duration = Duration::from_secs(60);
 /// 30 days of minute-resolution samples — pruned on every tick, not on a
 /// separate schedule.
 const RETENTION_SECS: i64 = 30 * 86_400;
-/// Matches HealthStrip's own "below this and players feel it as lag" line.
-const LOW_TPS_THRESHOLD: f32 = 15.0;
 
 fn now() -> i64 {
     SystemTime::now()
@@ -38,15 +35,11 @@ fn now() -> i64 {
 
 pub struct MetricsSampler {
     app: AppHandle,
-    /// Server ids currently in a low-TPS episode — so a Discord ping only
-    /// fires once *entering* trouble, not once a minute while it stays bad.
-    /// Cleared the moment TPS recovers, so the next real dip pings again.
-    low_tps: Mutex<HashSet<String>>,
 }
 
 impl MetricsSampler {
     pub fn new(app: AppHandle) -> Arc<Self> {
-        Arc::new(Self { app, low_tps: Mutex::new(HashSet::new()) })
+        Arc::new(Self { app })
     }
 
     pub fn start(self: Arc<Self>) {
@@ -81,33 +74,8 @@ impl MetricsSampler {
             .flatten();
 
             let _ = db.insert_metric_sample(&rec.id, ts, ram_mb, cpu_pct, tps);
-            self.check_low_tps(&db, &rec, tps);
         }
 
         let _ = db.prune_metric_samples(ts - RETENTION_SECS);
-    }
-
-    fn check_low_tps(&self, db: &Db, rec: &crate::db::ServerRecord, tps: Option<f32>) {
-        let Some(tps) = tps else { return };
-        let mut low = self.low_tps.lock().unwrap();
-        let was_low = low.contains(&rec.id);
-        let is_low = tps < LOW_TPS_THRESHOLD;
-        if is_low == was_low {
-            return; // no state change — either steady-bad (already pinged) or steady-fine
-        }
-        if is_low {
-            low.insert(rec.id.clone());
-            drop(low);
-            let url = crate::commands::read_app_settings(db).discord_webhook_url;
-            let url = url.trim().to_string();
-            if !url.is_empty() {
-                crate::discord::notify(
-                    &url,
-                    format!("🟡 **{}** is lagging — {:.1} tps", rec.name, tps),
-                );
-            }
-        } else {
-            low.remove(&rec.id);
-        }
     }
 }

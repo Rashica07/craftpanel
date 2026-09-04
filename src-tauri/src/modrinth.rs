@@ -109,6 +109,8 @@ struct RawVersion {
     files: Vec<RawFile>,
     #[serde(default)]
     dependencies: Vec<RawDep>,
+    #[serde(default)]
+    game_versions: Vec<String>,
 }
 #[derive(Deserialize)]
 struct RawFile {
@@ -454,6 +456,24 @@ pub fn install_resourcepack(
 pub fn gallery(project_id: &str) -> Result<Vec<String>, String> {
     let detail: RawProjectDetail = get_json(&format!("{API}/project/{project_id}"))?;
     Ok(detail.gallery.into_iter().map(|g| g.url).collect())
+}
+
+/// Every Minecraft version this project has an actual published build
+/// for, on a given loader — the union of every version's
+/// `game_versions` list. Exists to fix a real bug in the "Quick start"
+/// template flow: it used to grab whatever Paper build is newest and
+/// hope the template's plugin had already published one for it, which
+/// fails the moment a less-actively-maintained plugin (Iridium Skyblock,
+/// say) hasn't caught up to a brand-new Minecraft version yet. Now the
+/// caller intersects this with the available loader versions itself and
+/// picks the newest one both actually support.
+pub fn supported_versions(project: &str, loader: &str) -> Result<Vec<String>, String> {
+    let url = format!("{API}/project/{project}/version?loaders=[\"{loader}\"]");
+    let versions: Vec<RawVersion> = get_json(&url)?;
+    let mut out: Vec<String> = versions.into_iter().flat_map(|v| v.game_versions).collect();
+    out.sort();
+    out.dedup();
+    Ok(out)
 }
 
 // --- installed list + updates -----------------------------------------

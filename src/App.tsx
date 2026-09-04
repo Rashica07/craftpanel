@@ -111,9 +111,6 @@ function ServerRow({
             <span className="truncate font-mono">{server.mc_version}</span>
           </>
         )}
-        {server.sync_code && (
-          <Icon name="cloud" size={11} className="ml-auto shrink-0 text-info" />
-        )}
       </div>
     </button>
   );
@@ -583,7 +580,7 @@ export default function App() {
                 CraftPanel settings
               </span>
               <span className="block text-2xs text-ink-faint">
-                Java, updates, cloud &amp; more
+                Java, updates &amp; more
               </span>
             </span>
             <Icon name="chevron-right" size={13} className="text-ink-ghost" />

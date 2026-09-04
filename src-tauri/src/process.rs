@@ -41,37 +41,6 @@ impl EventSink for TauriSink {
     fn status(&self, snap: &ProcSnapshot) {
         use tauri::Emitter;
         let _ = self.0.emit("server:status", snap);
-        self.notify_discord(snap);
-    }
-}
-
-impl TauriSink {
-    /// Only the transitions someone actually wants a ping for — not
-    /// `Starting`/`Stopping`, which are noisy and always immediately
-    /// followed by one of these.
-    fn notify_discord(&self, snap: &ProcSnapshot) {
-        use tauri::Manager;
-        let Some(db) = self.0.try_state::<crate::db::Db>() else { return };
-        let url = crate::commands::read_app_settings(&db).discord_webhook_url;
-        let url = url.trim();
-        if url.is_empty() {
-            return;
-        }
-        let message = match snap.status {
-            ServerStatus::Running => None, // covered by the frontend/user starting it themselves — Crashed/Stopped are the ones worth a ping away from the app
-            ServerStatus::Crashed => Some("🔴 crashed"),
-            ServerStatus::Stopped if !snap.stop_requested => Some("🟠 stopped unexpectedly"),
-            ServerStatus::Stopped => Some("⚪ stopped"),
-            _ => None,
-        };
-        let Some(message) = message else { return };
-        let name = db
-            .get_server(&snap.server_id)
-            .ok()
-            .flatten()
-            .map(|r| r.name)
-            .unwrap_or_else(|| snap.server_id.clone());
-        crate::discord::notify(url, format!("**{name}** {message}"));
     }
 }
 

@@ -16,6 +16,7 @@ use crate::branding;
 use crate::crashreports::{self, CrashReport};
 use crate::crossplay::{self, CrossplayStatus};
 use crate::db::{self, Db, NewServer, ServerRecord};
+use crate::curseforge;
 use crate::modrinth::{self, InstallResult, InstalledEntry, SearchResult};
 use crate::perf::{self, PerfSample};
 use crate::pluginconfig;
@@ -34,11 +35,8 @@ use crate::properties::Properties;
 use crate::provision::{self, CreateSpec, Loader, VersionInfo};
 use crate::rcon::{self, RconClient, RconPool};
 use crate::resourcepack::{self, ResourcePackConfig};
-use crate::cloud::CloudManager;
-use crate::r2::R2Config;
 use crate::settings::{self, ServerSettings};
 use crate::share::{self, ShareInfo, ShareView};
-use crate::sync::CloudStatus;
 use crate::system::{self, SystemInfo};
 use crate::DeviceId;
 
@@ -610,6 +608,7 @@ fn parse_loader(s: &str) -> Result<Loader, String> {
     Ok(match s {
         "vanilla" => Loader::Vanilla,
         "paper" => Loader::Paper,
+        "spigot" => Loader::Spigot,
         "fabric" => Loader::Fabric,
         "neoforge" => Loader::Neoforge,
         "forge" => Loader::Forge,
@@ -1021,20 +1020,6 @@ pub fn backup_now(
 pub fn list_backups(db: State<Db>, id: String) -> Result<Vec<Backup>, String> {
     let rec = load(&db, &id)?;
     Ok(backups::list(std::path::Path::new(&rec.path)))
-}
-
-/// This server's backups already pushed to R2 (via Schedule.cloud_backup),
-/// read from that server's remote index — no zips downloaded, no R2 call at
-/// all if it isn't configured.
-#[tauri::command]
-pub fn cloud_backups(
-    cloud: State<Arc<CloudManager>>,
-    id: String,
-) -> Result<Vec<Backup>, String> {
-    if !cloud.is_configured() {
-        return Ok(Vec::new());
-    }
-    cloud.cloud_backups(&id)
 }
 
 #[tauri::command]
@@ -1645,6 +1630,14 @@ pub fn modrinth_gallery(project_id: String) -> Result<Vec<String>, String> {
     modrinth::gallery(&project_id)
 }
 
+/// Every Minecraft version this project actually has a build for, on a
+/// given loader — see `modrinth::supported_versions`'s own doc comment
+/// for the real bug this exists to fix.
+#[tauri::command]
+pub fn modrinth_supported_versions(project_id: String, loader: String) -> Result<Vec<String>, String> {
+    modrinth::supported_versions(&project_id, &loader)
+}
+
 #[tauri::command]
 pub fn modrinth_installed(db: State<Db>, id: String) -> Result<Vec<InstalledEntry>, String> {
     let rec = load(&db, &id)?;
@@ -1667,6 +1660,62 @@ pub fn modrinth_update(db: State<Db>, id: String, project_id: String) -> Result<
 pub fn modrinth_remove(db: State<Db>, id: String, project_id: String) -> Result<(), String> {
     let rec = load(&db, &id)?;
     modrinth::remove_one(&rec.path, rec.server_type, &project_id)
+}
+
+// --- Stage 8b: CurseForge content browser ---------------------------------
+
+#[tauri::command]
+pub fn curseforge_search(
+    db: State<Db>,
+    id: String,
+    query: String,
+    project_type: String,
+    offset: Option<u32>,
+) -> Result<curseforge::SearchResult, String> {
+    let rec = load(&db, &id)?;
+    let key = curseforge::EMBEDDED_API_KEY;
+    curseforge::search(
+        &rec.path,
+        rec.server_type,
+        &query,
+        &project_type,
+        rec.mc_version.as_deref(),
+        offset.unwrap_or(0),
+        &key,
+    )
+}
+
+#[tauri::command]
+pub fn curseforge_install(db: State<Db>, id: String, mod_id: i64) -> Result<curseforge::InstallResult, String> {
+    let rec = load(&db, &id)?;
+    let key = curseforge::EMBEDDED_API_KEY;
+    curseforge::install(&rec.path, rec.server_type, mod_id, rec.mc_version.as_deref(), &key)
+}
+
+#[tauri::command]
+pub fn curseforge_installed(db: State<Db>, id: String) -> Result<Vec<curseforge::InstalledEntry>, String> {
+    let rec = load(&db, &id)?;
+    Ok(curseforge::installed(&rec.path))
+}
+
+#[tauri::command]
+pub fn curseforge_check_updates(db: State<Db>, id: String) -> Result<Vec<curseforge::InstalledEntry>, String> {
+    let rec = load(&db, &id)?;
+    let key = curseforge::EMBEDDED_API_KEY;
+    curseforge::check_updates(&rec.path, rec.mc_version.as_deref(), &key)
+}
+
+#[tauri::command]
+pub fn curseforge_update(db: State<Db>, id: String, mod_id: i64) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    let key = curseforge::EMBEDDED_API_KEY;
+    curseforge::update_one(&rec.path, rec.server_type, mod_id, rec.mc_version.as_deref(), &key)
+}
+
+#[tauri::command]
+pub fn curseforge_remove(db: State<Db>, id: String, mod_id: i64) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    curseforge::remove_one(&rec.path, rec.server_type, mod_id)
 }
 
 // --- Stage 9: anti-cheat + management API ---------------------------------
@@ -1732,8 +1781,6 @@ pub struct AppSettings {
     pub keep_servers_on_quit: bool,
     /// Discord webhook URL — server start/stop/crash and scheduled-backup
     /// notifications post here. Blank = notifications off.
-    #[serde(default)]
-    pub discord_webhook_url: String,
     /// Keeps the Mac from sleeping while it's on AC power (battery still
     /// sleeps normally) — what makes a per-server scheduled start able to
     /// actually fire instead of sitting there asleep at the target time.
@@ -1768,22 +1815,12 @@ pub fn app_settings_set(
 }
 
 #[tauri::command]
-pub fn discord_test_webhook(url: String) -> Result<(), String> {
-    let url = url.trim();
-    if url.is_empty() {
-        return Err("Paste a webhook URL first.".to_string());
-    }
-    crate::discord::post(url, "👋 CraftPanel is wired up — you'll hear from this channel when a server crashes, stops on its own, or a scheduled backup fails.")
-}
-
-#[tauri::command]
 pub fn doctor_check(
     app: tauri::AppHandle,
     db: State<Db>,
-    cloud: State<Arc<CloudManager>>,
 ) -> Result<crate::doctor::DoctorReport, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    Ok(crate::doctor::run(&db, &cloud, &dir))
+    Ok(crate::doctor::run(&db, &dir))
 }
 
 #[tauri::command]
@@ -1902,121 +1939,6 @@ pub fn share_status(
 ) -> Result<ShareView, String> {
     let rec = load(&db, &id)?;
     Ok(share::view(std::path::Path::new(&rec.path), &device.0))
-}
-
-// --- cloud sync (R2) -----------------------------------------------------------
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct R2Status {
-    pub configured: bool,
-    pub config: Option<R2Config>,
-}
-
-#[tauri::command]
-pub fn r2_config_get(cloud: State<Arc<CloudManager>>) -> R2Status {
-    R2Status {
-        configured: cloud.is_configured(),
-        config: cloud.config_redacted(),
-    }
-}
-
-#[tauri::command]
-pub fn r2_config_set(cloud: State<Arc<CloudManager>>, config: R2Config) -> Result<(), String> {
-    cloud.set_config(config)
-}
-
-#[tauri::command]
-pub fn r2_config_clear(cloud: State<Arc<CloudManager>>) {
-    cloud.clear_config();
-}
-
-#[tauri::command]
-pub fn cloud_share(
-    db: State<Db>,
-    cloud: State<Arc<CloudManager>>,
-    id: String,
-) -> Result<String, String> {
-    let rec = load(&db, &id)?;
-    if rec.sync_code.is_some() {
-        return Err("This server is already shared to the cloud.".into());
-    }
-    let code = cloud.share(&rec)?;
-    db.set_sync_code(&id, Some(&code)).map_err(|e| e.to_string())?;
-    Ok(code)
-}
-
-#[tauri::command]
-pub fn cloud_join(
-    db: State<Db>,
-    procs: State<ProcessManager>,
-    cloud: State<Arc<CloudManager>>,
-    code: String,
-    folder: String,
-) -> Result<ServerRecord, String> {
-    let dir = std::path::Path::new(&folder);
-    if dir.exists()
-        && std::fs::read_dir(dir).map(|mut d| d.next().is_some()).unwrap_or(false)
-    {
-        return Err("Pick an empty folder to download the shared server into.".into());
-    }
-    let norm = |s: &str| {
-        s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_uppercase()
-    };
-    let code = norm(&code);
-    if db.list_servers().unwrap_or_default().iter().any(|s| s.sync_code.as_deref().map(norm) == Some(code.clone())) {
-        return Err("You've already joined this shared server.".into());
-    }
-
-    let m = cloud.join(&code, dir)?;
-    let java = java::probe(None).map(|j| j.path).unwrap_or_else(|| "java".into());
-    let rec = db
-        .insert_server(NewServer {
-            name: m.name,
-            path: folder,
-            server_type: m.loader,
-            launch_target: m.launch_target,
-            mc_version: m.mc_version,
-            java_path: java,
-            ram_mb: 4096,
-        })
-        .map_err(|e| e.to_string())?;
-    db.set_sync_code(&rec.id, Some(&code)).map_err(|e| e.to_string())?;
-    let _ = procs.snapshot(&rec.id);
-    let mut rec = rec;
-    rec.sync_code = Some(code);
-    Ok(rec)
-}
-
-#[tauri::command]
-pub fn cloud_status(
-    db: State<Db>,
-    cloud: State<Arc<CloudManager>>,
-    id: String,
-) -> Result<Option<CloudStatus>, String> {
-    let rec = load(&db, &id)?;
-    cloud.status(&rec)
-}
-
-#[tauri::command]
-pub fn cloud_finish(
-    db: State<Db>,
-    cloud: State<Arc<CloudManager>>,
-    id: String,
-) -> Result<(), String> {
-    let rec = load(&db, &id)?;
-    cloud.finish(&rec)
-}
-
-#[tauri::command]
-pub fn cloud_unshare(
-    db: State<Db>,
-    cloud: State<Arc<CloudManager>>,
-    id: String,
-) -> Result<(), String> {
-    let rec = load(&db, &id)?;
-    cloud.unshare(&rec)?;
-    db.set_sync_code(&id, None).map_err(|e| e.to_string())
 }
 
 fn gen_password() -> String {

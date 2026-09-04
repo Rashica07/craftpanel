@@ -14,9 +14,11 @@ import type {
   ModpackSpec,
   Backup,
   BackupsConfig,
-  CloudStatus,
   CrashReport,
   CreateSpec,
+  CurseForgeInstallResult,
+  CurseForgeInstalled,
+  CurseForgeSearch,
   CrossplayStatus,
   MgmtStatus,
   Suspicion,
@@ -43,8 +45,6 @@ import type {
   PluginConfigView,
   ProcSnapshot,
   ProvisionProgress,
-  R2Config,
-  R2Status,
   RconSettings,
   RemoteApiStatus,
   RconSetupResult,
@@ -226,9 +226,6 @@ export const api = {
   },
   listBackups(id: string): Promise<Backup[]> {
     return invoke("list_backups", { id });
-  },
-  cloudBackups(id: string): Promise<Backup[]> {
-    return invoke("cloud_backups", { id });
   },
   deleteBackup(id: string, backupId: string): Promise<void> {
     return invoke("delete_backup", { id, backupId });
@@ -450,6 +447,9 @@ export const api = {
   modrinthGallery(projectId: string): Promise<string[]> {
     return invoke("modrinth_gallery", { projectId });
   },
+  modrinthSupportedVersions(projectId: string, loader: string): Promise<string[]> {
+    return invoke("modrinth_supported_versions", { projectId, loader });
+  },
   modrinthInstalled(id: string): Promise<ModrinthInstalled[]> {
     return invoke("modrinth_installed", { id });
   },
@@ -461,6 +461,31 @@ export const api = {
   },
   modrinthRemove(id: string, projectId: string): Promise<void> {
     return invoke("modrinth_remove", { id, projectId });
+  },
+
+  // Stage 8b — CurseForge content browser
+  curseforgeSearch(
+    id: string,
+    query: string,
+    projectType: string,
+    offset = 0,
+  ): Promise<CurseForgeSearch> {
+    return invoke("curseforge_search", { id, query, projectType, offset });
+  },
+  curseforgeInstall(id: string, modId: number): Promise<CurseForgeInstallResult> {
+    return invoke("curseforge_install", { id, modId });
+  },
+  curseforgeInstalled(id: string): Promise<CurseForgeInstalled[]> {
+    return invoke("curseforge_installed", { id });
+  },
+  curseforgeCheckUpdates(id: string): Promise<CurseForgeInstalled[]> {
+    return invoke("curseforge_check_updates", { id });
+  },
+  curseforgeUpdate(id: string, modId: number): Promise<void> {
+    return invoke("curseforge_update", { id, modId });
+  },
+  curseforgeRemove(id: string, modId: number): Promise<void> {
+    return invoke("curseforge_remove", { id, modId });
   },
 
   // Stage 9 — anti-cheat + management API
@@ -492,9 +517,6 @@ export const api = {
   },
   installUpdate(): Promise<void> {
     return invoke("install_update");
-  },
-  discordTestWebhook(url: string): Promise<void> {
-    return invoke("discord_test_webhook", { url });
   },
   onUpdateProgress(fn: (p: ProvisionProgress) => void): Promise<UnlistenFn> {
     return listen<ProvisionProgress>("update:progress", (e) => fn(e.payload));
@@ -582,39 +604,6 @@ export const api = {
   },
   shareStatus(id: string): Promise<ShareView> {
     return invoke("share_status", { id });
-  },
-
-  // cloud sync (R2)
-  r2ConfigGet(): Promise<R2Status> {
-    return invoke("r2_config_get");
-  },
-  r2ConfigSet(config: R2Config): Promise<void> {
-    return invoke("r2_config_set", { config });
-  },
-  r2ConfigClear(): Promise<void> {
-    return invoke("r2_config_clear");
-  },
-  cloudShare(id: string): Promise<string> {
-    return invoke("cloud_share", { id });
-  },
-  cloudJoin(code: string, folder: string): Promise<ServerRecord> {
-    return invoke("cloud_join", { code, folder });
-  },
-  cloudStatus(id: string): Promise<CloudStatus | null> {
-    return invoke("cloud_status", { id });
-  },
-  cloudFinish(id: string): Promise<void> {
-    return invoke("cloud_finish", { id });
-  },
-  cloudUnshare(id: string): Promise<void> {
-    return invoke("cloud_unshare", { id });
-  },
-  onSyncProgress(
-    fn: (p: { serverId: string; message: string }) => void,
-  ): Promise<UnlistenFn> {
-    return listen<{ serverId: string; message: string }>("sync:progress", (e) =>
-      fn(e.payload),
-    );
   },
 
   onLog(fn: (line: LogLine) => void): Promise<UnlistenFn> {

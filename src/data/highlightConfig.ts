@@ -171,7 +171,20 @@ function tokenizeJson(line: string): Token[] {
       i = j;
     } else {
       let j = i + 1;
-      while (j < line.length && line[j] !== '"' && !/[0-9-]/.test(line[j])) j++;
+      // This scan has to stop right before a true/false/null keyword
+      // starts, or it swallows the keyword as plain text before the
+      // dedicated branch above ever gets a turn at that position — a
+      // real bug this had: `"a": true,` never highlighted `true` at
+      // all, since the catch-all ran straight past it to the comma.
+      while (
+        j < line.length &&
+        line[j] !== '"' &&
+        !/[0-9-]/.test(line[j]) &&
+        !line.startsWith("true", j) &&
+        !line.startsWith("false", j) &&
+        !line.startsWith("null", j)
+      )
+        j++;
       push(out, line.slice(i, j));
       i = j;
     }

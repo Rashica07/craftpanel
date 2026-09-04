@@ -105,6 +105,15 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
   const chosen = snaps?.find((s) => s.id === selected) ?? null;
   // oldest-to-newest, left-to-right, like a real timeline
   const ordered = snaps ? [...snaps].reverse() : [];
+  // `snaps` comes back newest-first from the backend, so index 0 is the
+  // true latest — selection deliberately stays put across reloads (so
+  // inspecting an old tick doesn't get yanked out from under you while
+  // new snapshots keep arriving), but that means it can silently drift
+  // away from "latest" with nothing on screen saying so. This is what
+  // actually caused a real incident: someone was about to restore a
+  // 17-hour-old snapshot thinking it was current.
+  const latestId = snaps?.[0]?.id ?? null;
+  const onLatest = !selected || selected === latestId;
 
   return (
     <Card
@@ -132,7 +141,10 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
           <div className="cp-well overflow-x-auto rounded-lg border border-line-soft px-3 py-3">
             <div className="flex min-w-max items-end gap-1.5" style={{ height: 40 }}>
               {ordered.map((s) => (
-                <Tooltip key={s.id} label={`${clock(s.createdAt)} · ${size(s.newBytes)}`}>
+                <Tooltip
+                  key={s.id}
+                  label={`${clock(s.createdAt)} · ${size(s.newBytes)}${s.id === latestId ? " · latest" : ""}`}
+                >
                   <button
                     onClick={() => setSelected(s.id)}
                     aria-pressed={selected === s.id}
@@ -140,7 +152,9 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
                       "w-2.5 shrink-0 rounded-sm transition-all",
                       selected === s.id
                         ? "h-full bg-accent"
-                        : "h-3/5 bg-ink-ghost/50 hover:h-4/5 hover:bg-accent-soft",
+                        : s.id === latestId
+                          ? "h-4/5 bg-accent-soft/70 hover:h-full hover:bg-accent-soft"
+                          : "h-3/5 bg-ink-dim hover:h-4/5 hover:bg-accent-soft",
                     )}
                   />
                 </Tooltip>
@@ -154,7 +168,14 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
                 <Icon name="clock" size={15} />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm text-ink">{clock(chosen.createdAt)}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-ink">{clock(chosen.createdAt)}</span>
+                  {!onLatest && (
+                    <Badge tone="warn" size="sm">
+                      not the latest
+                    </Badge>
+                  )}
+                </div>
                 <div className="mt-0.5 flex items-center gap-2 text-2xs text-ink-faint">
                   <span>{ago(chosen.createdAt)}</span>
                   <span className="text-ink-ghost">·</span>
@@ -163,6 +184,17 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
                   <Badge tone={chosen.trigger === "manual" ? "neutral" : "accent"} size="sm">
                     {chosen.trigger}
                   </Badge>
+                  {!onLatest && (
+                    <>
+                      <span className="text-ink-ghost">·</span>
+                      <button
+                        className="text-accent-soft hover:underline"
+                        onClick={() => setSelected(latestId)}
+                      >
+                        Jump to latest
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               {!confirming ? (

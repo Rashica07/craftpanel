@@ -33,28 +33,6 @@ export interface ServerRecord {
   keep_awake: boolean;
 }
 
-export interface R2Config {
-  accountId: string;
-  bucket: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
-export interface R2Status {
-  configured: boolean;
-  config: R2Config | null;
-}
-
-export interface CloudStatus {
-  exists: boolean;
-  locked: boolean;
-  heldByUs: boolean;
-  holderName: string | null;
-  expiresIn: number | null;
-  localAhead: boolean;
-  cloudAhead: boolean;
-}
-
 export interface NewServer {
   name: string;
   path: string;
@@ -123,7 +101,7 @@ export interface PlayerList {
   players: string[];
 }
 
-export type Loader = "vanilla" | "paper" | "fabric" | "neoforge" | "forge" | "bedrock";
+export type Loader = "vanilla" | "paper" | "spigot" | "fabric" | "neoforge" | "forge" | "bedrock";
 
 export interface VersionInfo {
   id: string;
@@ -249,7 +227,6 @@ export interface Schedule {
   timedCommands: TimedCommand[];
   backupOnStop: boolean;
   intervalBackupHours: number | null;
-  cloudBackup: boolean;
   /** minutes between automatic Time Machine snapshots while running; null/0 = off */
   snapshotIntervalMins: number | null;
   /** keep every snapshot from within this many hours (0 = default 24) */
@@ -311,6 +288,48 @@ export interface ModrinthInstallResult {
   skipped: string[];
 }
 
+// CurseForge content browser — same shapes as the Modrinth ones above,
+// deliberately, so both sources render through one row component. See
+// `curseforge.rs`'s own doc comment for what this source does and
+// doesn't cover yet (mods/plugins only, no resource packs/data packs).
+export interface CurseForgeHit {
+  modId: number;
+  slug: string;
+  title: string;
+  description: string;
+  downloads: number;
+  iconUrl: string | null;
+  projectType: string;
+  categories: string[];
+  installed: boolean;
+  compatible: boolean;
+}
+
+export interface CurseForgeSearch {
+  hits: CurseForgeHit[];
+  total: number;
+}
+
+export interface CurseForgeUpdate {
+  fileId: number;
+  filename: string;
+}
+
+export interface CurseForgeInstalled {
+  modId: number;
+  slug: string;
+  title: string;
+  filename: string;
+  fileId: number;
+  dependency: boolean;
+  update: CurseForgeUpdate | null;
+}
+
+export interface CurseForgeInstallResult {
+  installed: string[];
+  skipped: string[];
+}
+
 export interface AntiCheatRecommendation {
   name: string;
   slug: string;
@@ -337,7 +356,6 @@ export interface AppSettings {
   defaultRamMb: number;
   expertMode: boolean;
   keepServersOnQuit: boolean;
-  discordWebhookUrl: string;
   stayAwakeOnPower: boolean;
 }
 
@@ -442,6 +460,7 @@ export const LOADER_META: Record<
 > = {
   vanilla: { label: "Vanilla", blurb: "Mojang's unmodified server" },
   paper: { label: "Paper", blurb: "Fast, plugin-ready (Bukkit/Spigot API)" },
+  spigot: { label: "Spigot", blurb: "The original Bukkit/Spigot plugin server — compiled on your machine" },
   fabric: { label: "Fabric", blurb: "Lightweight mod loader" },
   neoforge: { label: "NeoForge", blurb: "Modern Forge fork" },
   forge: { label: "Forge", blurb: "The original mod loader" },

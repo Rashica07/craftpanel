@@ -29,6 +29,22 @@ const MARKS: Record<Loader, { bg: string; fg: string; art: React.ReactNode }> = 
       </>
     ),
   },
+  spigot: {
+    bg: "#4a2e12",
+    fg: "#f0a94a",
+    art: (
+      <>
+        <circle cx="16" cy="16" r="9" fill="#e08a2e" />
+        <circle cx="16" cy="16" r="3.4" fill="#4a2e12" />
+        <path
+          d="M16 5v3M16 24v3M27 16h-3M8 16H5M23.8 8.2l-2.1 2.1M10.3 21.7l-2.1 2.1M23.8 23.8l-2.1-2.1M10.3 10.3L8.2 8.2"
+          stroke="#4a2e12"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+  },
   fabric: {
     bg: "#4a3d24",
     fg: "#dcc48a",

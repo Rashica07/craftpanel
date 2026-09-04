@@ -1,7 +1,7 @@
 [package]
 name = "craftpanel"
 default-run = "craftpanel"
-version = "2.8.1"
+version = "2.9.0"
 description = "CraftPanel - self-hosted Minecraft server manager"
 authors = ["you"]
 edition = "2021"
@@ -34,7 +34,6 @@ sha1 = "0.10"
 sha2 = "0.10"
 argon2 = "0.5"
 tiny_http = "0.12"
-rusty-s3 = "0.7"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }

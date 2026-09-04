@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
-import type { ModrinthInstalled, ModrinthSearch, ServerType } from "../types";
+import type {
+  CurseForgeHit,
+  CurseForgeInstalled,
+  ModrinthHit,
+  ModrinthInstalled,
+  ModrinthSearch,
+  ServerType,
+} from "../types";
 import {
   Badge,
   Banner,
@@ -106,6 +113,67 @@ function typesFor(t: ServerType): { id: string; label: string }[] {
   return [primary, { id: "datapack", label: "Datapacks" }, RESOURCEPACK_TAB];
 }
 
+type Source = "modrinth" | "curseforge";
+
+/** One row shape both sources render through — see `curseforge.rs`'s doc
+ *  comment for exactly what CurseForge does and doesn't cover (mods and
+ *  plugins only, no server/client-side split the way Modrinth exposes
+ *  it, no category filters yet). Missing fields render as absent rather
+ *  than faked. */
+type Row = {
+  id: string;
+  title: string;
+  description: string;
+  downloads: number;
+  iconUrl: string | null;
+  compatible: boolean;
+  installed: boolean;
+  externalUrl: string;
+  categories: string[];
+  clientSide?: string;
+  serverSide?: string;
+};
+
+function rowFromModrinth(h: ModrinthHit): Row {
+  return {
+    id: h.projectId,
+    title: h.title,
+    description: h.description,
+    downloads: h.downloads,
+    iconUrl: h.iconUrl,
+    compatible: h.compatible,
+    installed: h.installed,
+    externalUrl: `https://modrinth.com/${h.projectType}/${h.slug}`,
+    categories: h.categories,
+    clientSide: h.clientSide,
+    serverSide: h.serverSide,
+  };
+}
+
+function rowFromCurseForge(h: CurseForgeHit, serverType: ServerType): Row {
+  const section = serverType === "paper" || serverType === "spigot" ? "bukkit-plugins" : "mc-mods";
+  return {
+    id: String(h.modId),
+    title: h.title,
+    description: h.description,
+    downloads: h.downloads,
+    iconUrl: h.iconUrl,
+    compatible: h.compatible,
+    installed: h.installed,
+    externalUrl: `https://www.curseforge.com/minecraft/${section}/${h.slug}`,
+    categories: h.categories,
+  };
+}
+
+type InstalledRow = {
+  key: string;
+  refId: string;
+  title: string;
+  source: Source;
+  dependency: boolean;
+  updateLabel: string | null;
+};
+
 export function BrowsePanel({
   serverId,
   serverType,
@@ -125,16 +193,26 @@ export function BrowsePanel({
   const [query, setQuery] = useState(initialQuery ?? "");
   const [res, setRes] = useState<ModrinthSearch | null>(null);
   const [installed, setInstalled] = useState<ModrinthInstalled[]>([]);
+  const [source, setSource] = useState<Source>("modrinth");
+  const [cfRes, setCfRes] = useState<{ hits: CurseForgeHit[]; total: number } | null>(null);
+  const [cfInstalled, setCfInstalled] = useState<CurseForgeInstalled[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // CurseForge (curseforge.rs) only covers mods/plugins so far — the
+  // Datapacks/Resource Packs tabs always mean Modrinth, whatever the
+  // toggle last said.
+  const effectiveSource: Source = ptype === "mod" ? source : "modrinth";
+
   const loadInstalled = useCallback(() => {
     api.modrinthInstalled(serverId).then(setInstalled).catch(() => {});
+    api.curseforgeInstalled(serverId).then(setCfInstalled).catch(() => {});
   }, [serverId]);
 
   useEffect(() => {
     setRes(null);
+    setCfRes(null);
     setQuery(initialQuery ?? "");
     setCategory(null);
     setError(null);
@@ -154,16 +232,26 @@ export function BrowsePanel({
   const doSearch = useCallback(async () => {
     setError(null);
     try {
-      setRes(await api.modrinthSearch(serverId, query, ptype, category));
+      if (effectiveSource === "curseforge") {
+        setCfRes(await api.curseforgeSearch(serverId, query, ptype));
+      } else {
+        setRes(await api.modrinthSearch(serverId, query, ptype, category));
+      }
     } catch (e) {
       setError(String(e));
     }
-  }, [serverId, query, ptype, category]);
+  }, [serverId, query, ptype, category, effectiveSource]);
 
   useEffect(() => {
     const t = setTimeout(doSearch, query ? 350 : 0);
     return () => clearTimeout(t);
-  }, [doSearch, query, ptype, category]);
+  }, [doSearch, query, ptype, category, effectiveSource]);
+
+  const rows: Row[] =
+    effectiveSource === "curseforge"
+      ? (cfRes?.hits ?? []).map((h) => rowFromCurseForge(h, serverType))
+      : (res?.hits ?? []).map(rowFromModrinth);
+  const hasSearched = effectiveSource === "curseforge" ? cfRes !== null : res !== null;
 
   const [rpRefresh, setRpRefresh] = useState(0);
   const [preview, setPreview] = useState<{ projectId: string; title: string; images: string[] | null } | null>(
@@ -198,12 +286,15 @@ export function BrowsePanel({
     }
   }
 
-  async function install(projectId: string, title: string) {
-    setBusy(projectId);
+  async function install(id: string, title: string) {
+    setBusy(id);
     setError(null);
     setNote(`Installing ${title}…`);
     try {
-      const r = await api.modrinthInstall(serverId, projectId, ptype);
+      const r =
+        effectiveSource === "curseforge"
+          ? await api.curseforgeInstall(serverId, Number(id))
+          : await api.modrinthInstall(serverId, id, ptype);
       const extra = r.installed.length - 1;
       setNote(
         `Installed ${title}${extra > 0 ? ` + ${extra} ${extra === 1 ? "dependency" : "dependencies"}` : ""}.`,
@@ -236,8 +327,73 @@ export function BrowsePanel({
     }
   }
 
-  const updates = installed.filter((i) => i.update);
+  const installedRows: InstalledRow[] = [
+    ...installed.map((i) => ({
+      key: `mr-${i.projectId}`,
+      refId: i.projectId,
+      title: i.title,
+      source: "modrinth" as const,
+      dependency: i.dependency,
+      updateLabel: i.update?.versionNumber ?? null,
+    })),
+    ...cfInstalled.map((i) => ({
+      key: `cf-${i.modId}`,
+      refId: String(i.modId),
+      title: i.title,
+      source: "curseforge" as const,
+      dependency: i.dependency,
+      updateLabel: i.update?.filename ?? null,
+    })),
+  ];
+  const updateCount = installedRows.filter((r) => r.updateLabel).length;
   const enforcesClientMods = enforcesClientModsFor(serverType);
+
+  async function checkForUpdates() {
+    setBusy("chk");
+    setError(null);
+    setNote(null);
+    try {
+      await api.modrinthCheckUpdates(serverId);
+      if (cfInstalled.length > 0) {
+        try {
+          await api.curseforgeCheckUpdates(serverId);
+        } catch {
+          // a cleared/invalid CurseForge key shouldn't block the Modrinth
+          // half of this from working — surfaced via per-item state
+          // instead of failing the whole check
+        }
+      }
+      setNote("Checked for updates.");
+      onNeedsRestart();
+      loadInstalled();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function updateOne(row: InstalledRow) {
+    await act(
+      () =>
+        row.source === "curseforge"
+          ? api.curseforgeUpdate(serverId, Number(row.refId))
+          : api.modrinthUpdate(serverId, row.refId),
+      `Updated ${row.title}.`,
+      row.key,
+    );
+  }
+
+  async function removeOne(row: InstalledRow) {
+    await act(
+      () =>
+        row.source === "curseforge"
+          ? api.curseforgeRemove(serverId, Number(row.refId))
+          : api.modrinthRemove(serverId, row.refId),
+      `Removed ${row.title}.`,
+      row.key,
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -248,12 +404,22 @@ export function BrowsePanel({
           onChange={setPtype}
           options={tabs.map((t) => ({ value: t.id, label: t.label }))}
         />
+        {ptype === "mod" && (
+          <Segmented
+            value={source}
+            onChange={setSource}
+            options={[
+              { value: "modrinth", label: "Modrinth" },
+              { value: "curseforge", label: "CurseForge" },
+            ]}
+          />
+        )}
         <TextInput
           icon="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && doSearch()}
-          placeholder="Search Modrinth — try “worldedit” or “shopkeepers”…"
+          placeholder={effectiveSource === "curseforge" ? "Search CurseForge — try “jei” or “essentialsx”…" : "Search Modrinth — try “worldedit” or “shopkeepers”…"}
         />
         <Button variant="secondary" icon="search" onClick={doSearch}>
           Search
@@ -264,7 +430,7 @@ export function BrowsePanel({
         <ResourcePackSection key={rpRefresh} serverId={serverId} className="mb-3" />
       )}
 
-      {ptype !== "datapack" && (
+      {ptype !== "datapack" && effectiveSource === "modrinth" && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <Pill active={category === null} onClick={() => setCategory(null)}>
             All
@@ -290,7 +456,7 @@ export function BrowsePanel({
 
       {/* ── results ──────────────────────────────────────────────── */}
       <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line-soft bg-surface shadow-e1">
-        {!res || (!query.trim() && res.hits.length === 0) ? (
+        {!hasSearched || (!query.trim() && rows.length === 0) ? (
           <StateBlock
             state="empty"
             icon="search"
@@ -298,10 +464,12 @@ export function BrowsePanel({
             message={
               ptype === "resourcepack"
                 ? "Search Modrinth's resource packs — picking one sets it as this server's pack directly, no download or hosting needed on your end."
-                : "Everything here comes from Modrinth, and CraftPanel picks the build that matches your Minecraft version — dependencies included."
+                : effectiveSource === "curseforge"
+                  ? "Everything here comes from CurseForge, and CraftPanel picks the file that matches your Minecraft version — dependencies included."
+                  : "Everything here comes from Modrinth, and CraftPanel picks the build that matches your Minecraft version — dependencies included."
             }
           />
-        ) : res.hits.length === 0 ? (
+        ) : rows.length === 0 ? (
           <StateBlock
             state="empty"
             icon="search"
@@ -315,14 +483,14 @@ export function BrowsePanel({
           />
         ) : (
           <ul className="divide-y divide-line-soft">
-            {res.hits.map((h) => {
+            {rows.map((h) => {
               const resolution =
                 ptype === "resourcepack"
                   ? RESOURCEPACK_CATEGORIES.find((r) => r.label.includes("x") && h.categories.includes(r.id))
                   : undefined;
               return (
               <li
-                key={h.projectId}
+                key={h.id}
                 className={cx(
                   "flex gap-3 px-3.5 py-3 transition-colors hover:bg-surface-2",
                   !h.compatible && "opacity-60",
@@ -351,7 +519,7 @@ export function BrowsePanel({
                   return clickable ? (
                     <Tooltip label="Preview screenshots">
                       <button
-                        onClick={() => previewPack(h.projectId, h.title)}
+                        onClick={() => previewPack(h.id, h.title)}
                         className="group relative shrink-0 overflow-hidden rounded-lg"
                       >
                         {content}
@@ -415,9 +583,9 @@ export function BrowsePanel({
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <Tooltip label="View on Modrinth">
+                  <Tooltip label={effectiveSource === "curseforge" ? "View on CurseForge" : "View on Modrinth"}>
                     <a
-                      href={`https://modrinth.com/${h.projectType}/${h.slug}`}
+                      href={h.externalUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="grid h-8 w-8 place-items-center rounded-md text-ink-faint transition-colors hover:bg-surface-3 hover:text-ink"
@@ -431,8 +599,8 @@ export function BrowsePanel({
                       size="sm"
                       icon="check"
                       disabled={!!busy}
-                      loading={busy === h.projectId}
-                      onClick={() => useAsResourcePack(h.projectId, h.title)}
+                      loading={busy === h.id}
+                      onClick={() => useAsResourcePack(h.id, h.title)}
                     >
                       Use this pack
                     </Button>
@@ -446,8 +614,8 @@ export function BrowsePanel({
                       size="sm"
                       icon="download"
                       disabled={!!busy}
-                      loading={busy === h.projectId}
-                      onClick={() => install(h.projectId, h.title)}
+                      loading={busy === h.id}
+                      onClick={() => install(h.id, h.title)}
                     >
                       Install
                     </Button>
@@ -461,17 +629,17 @@ export function BrowsePanel({
       </div>
 
       {/* ── what CraftPanel installed ────────────────────────────── */}
-      {installed.length > 0 && (
+      {installedRows.length > 0 && (
         <Card
           className="mt-3 shrink-0"
           title="Installed from here"
           icon="check-circle"
-          tone={updates.length ? "warn" : undefined}
+          tone={updateCount ? "warn" : undefined}
           right={
             <>
-              {updates.length > 0 && (
+              {updateCount > 0 && (
                 <Badge tone="warn" dot>
-                  {updates.length} update{updates.length > 1 ? "s" : ""}
+                  {updateCount} update{updateCount > 1 ? "s" : ""}
                 </Badge>
               )}
               <Button
@@ -480,13 +648,7 @@ export function BrowsePanel({
                 icon="refresh"
                 disabled={!!busy}
                 loading={busy === "chk"}
-                onClick={() =>
-                  act(
-                    () => api.modrinthCheckUpdates(serverId),
-                    "Checked for updates.",
-                    "chk",
-                  )
-                }
+                onClick={checkForUpdates}
               >
                 Check for updates
               </Button>
@@ -495,9 +657,9 @@ export function BrowsePanel({
           pad={false}
         >
           <ul className="max-h-44 divide-y divide-line-soft overflow-y-auto">
-            {installed.map((i) => (
+            {installedRows.map((i) => (
               <li
-                key={i.projectId}
+                key={i.key}
                 className="group flex items-center gap-2 px-3.5 py-2 transition-colors hover:bg-surface-2"
               >
                 <span className="min-w-0 flex-1 truncate text-xs text-ink">
@@ -510,25 +672,21 @@ export function BrowsePanel({
                     </Tooltip>
                   )}
                 </span>
-                <span className="shrink-0 font-mono text-2xs text-ink-faint">
-                  {i.versionNumber}
-                </span>
-                {i.update && (
+                {i.source === "curseforge" && (
+                  <Badge tone="neutral" size="sm">
+                    CurseForge
+                  </Badge>
+                )}
+                {i.updateLabel && (
                   <Button
                     variant="secondary"
                     size="sm"
                     icon="arrow-up"
                     disabled={!!busy}
-                    loading={busy === i.projectId}
-                    onClick={() =>
-                      act(
-                        () => api.modrinthUpdate(serverId, i.projectId),
-                        `Updated ${i.title}.`,
-                        i.projectId,
-                      )
-                    }
+                    loading={busy === i.key}
+                    onClick={() => updateOne(i)}
                   >
-                    {i.update.versionNumber}
+                    Update
                   </Button>
                 )}
                 <IconButton
@@ -537,13 +695,7 @@ export function BrowsePanel({
                   size="sm"
                   disabled={!!busy}
                   className="opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
-                  onClick={() =>
-                    act(
-                      () => api.modrinthRemove(serverId, i.projectId),
-                      `Removed ${i.title}.`,
-                      i.projectId,
-                    )
-                  }
+                  onClick={() => removeOne(i)}
                 />
               </li>
             ))}

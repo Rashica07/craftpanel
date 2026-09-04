@@ -7,12 +7,11 @@ mod backups;
 mod bedrock;
 mod branding;
 mod clone;
-mod cloud;
 mod commands;
 mod crashreports;
 mod crossplay;
+mod curseforge;
 mod db;
-mod discord;
 mod doctor;
 mod external;
 mod files;
@@ -31,7 +30,6 @@ mod power;
 mod process;
 mod properties;
 mod provision;
-mod r2;
 mod rcon;
 mod remote_api;
 mod resourcepack;
@@ -40,13 +38,10 @@ mod session;
 mod settings;
 mod share;
 mod snapshots;
-mod sync;
 mod system;
 mod tunnel;
 mod updater;
 mod worlds;
-
-use std::sync::Arc;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -54,7 +49,6 @@ use tauri::{
     Manager, RunEvent, WindowEvent,
 };
 
-use cloud::CloudManager;
 use db::Db;
 use process::ProcessManager;
 use rcon::RconPool;
@@ -113,12 +107,6 @@ pub fn run() {
                 .map_err(|e| format!("failed to open database: {e}"))?;
             let device_id = share::device_id(&dir);
             let procs = ProcessManager::new(app.handle().clone(), device_id.clone());
-            let cloud = Arc::new(CloudManager::new(
-                app.handle().clone(),
-                &dir,
-                device_id.clone(),
-            ));
-            procs.set_lifecycle(cloud.clone());
 
             // re-adopt servers this app launched before a restart / crash, so
             // they show as "Running (reattached)" and not "external"
@@ -132,7 +120,6 @@ pub fn run() {
             app.manage(db);
             app.manage(DeviceId(device_id));
             app.manage(procs);
-            app.manage(cloud);
             app.manage(tunnel);
             app.manage(RconPool::new());
 
@@ -266,7 +253,6 @@ pub fn run() {
             commands::import_mods,
             commands::backup_now,
             commands::list_backups,
-            commands::cloud_backups,
             commands::delete_backup,
             commands::restore_backup,
             commands::get_backups_config,
@@ -313,6 +299,7 @@ pub fn run() {
             commands::get_jvm_args,
             commands::set_jvm_args,
             commands::modrinth_search,
+            commands::modrinth_supported_versions,
             commands::modrinth_install,
             commands::modrinth_install_resourcepack,
             commands::modrinth_gallery,
@@ -320,6 +307,12 @@ pub fn run() {
             commands::modrinth_check_updates,
             commands::modrinth_update,
             commands::modrinth_remove,
+            commands::curseforge_search,
+            commands::curseforge_install,
+            commands::curseforge_installed,
+            commands::curseforge_check_updates,
+            commands::curseforge_update,
+            commands::curseforge_remove,
             commands::anticheat_advice,
             commands::anticheat_suspicion,
             commands::mgmt_status,
@@ -329,7 +322,6 @@ pub fn run() {
             commands::app_settings_set,
             commands::check_update,
             commands::install_update,
-            commands::discord_test_webhook,
             commands::app_install_id,
             commands::doctor_check,
             commands::crossplay_status,
@@ -348,14 +340,6 @@ pub fn run() {
             commands::unshare_server,
             commands::join_shared,
             commands::share_status,
-            commands::r2_config_get,
-            commands::r2_config_set,
-            commands::r2_config_clear,
-            commands::cloud_share,
-            commands::cloud_join,
-            commands::cloud_status,
-            commands::cloud_finish,
-            commands::cloud_unshare,
             remote_api::remote_api_status,
             remote_api::remote_api_set_enabled,
             remote_api::remote_api_regenerate_token,

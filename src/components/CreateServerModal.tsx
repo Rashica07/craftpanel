@@ -15,6 +15,7 @@ import {
   Checkbox,
   Field,
   IconButton,
+  Pill,
   ProgressBar,
   StateBlock,
   TextInput,
@@ -29,12 +30,13 @@ import { LogoMark } from "./Logo";
 import { RamSlider } from "./RamSlider";
 import { createPortal } from "react-dom";
 
-const LOADERS: Loader[] = ["paper", "vanilla", "fabric", "neoforge", "forge", "bedrock"];
+const LOADERS: Loader[] = ["paper", "vanilla", "spigot", "fabric", "neoforge", "forge", "bedrock"];
 
 /** Plain-language "why would I pick this?" — LOADER_META's blurb is terser. */
 const LOADER_PITCH: Record<Loader, string> = {
   paper: "Runs smoothly and takes plugins. The best pick if you're not sure.",
   vanilla: "Exactly what Mojang ships. No mods, no plugins, no surprises.",
+  spigot: "The original plugin server Paper is built on. CraftPanel compiles it for you — takes several minutes, not a download.",
   fabric: "Light and quick to update — the usual choice for modpacks.",
   neoforge: "The actively developed Forge. Use it for newer modpacks.",
   forge: "The classic mod loader. Use it if your modpack says Forge.",
@@ -254,6 +256,24 @@ export function CreateServerModal({
     if (!versionId && visibleVersions.length) setVersionId(visibleVersions[0].id);
   }, [visibleVersions, versionId]);
 
+  /** One-click shortcuts for the two versions people actually ask for by
+   * name: 1.8.9 (the long-running PvP/Hypixel-era version) and whatever
+   * the newest stable release currently is — computed fresh from the
+   * sorted list each time, never a hardcoded version string, so it never
+   * goes stale as new Minecraft versions ship. Only shown when that
+   * loader's own version list actually has a match (e.g. Fabric doesn't
+   * go back to 1.8.9, so no chip for it there). */
+  const pinnedVersions = useMemo(() => {
+    if (!versions?.length) return [];
+    const releases = versions.filter((v) => v.kind === "release");
+    const pins: { label: string; id: string }[] = [];
+    const classic = releases.find((v) => v.id === "1.8.9");
+    if (classic) pins.push({ label: "1.8.9", id: classic.id });
+    const latest = releases[0];
+    if (latest && latest.id !== classic?.id) pins.push({ label: `Latest (${latest.id})`, id: latest.id });
+    return pins;
+  }, [versions]);
+
   const sep = parentDir?.includes("\\") ? "\\" : "/";
   const safeName =
     name.trim().replace(/[^A-Za-z0-9 _-]/g, "").trim() || "server";
@@ -394,9 +414,9 @@ export function CreateServerModal({
                 className="mx-auto max-w-sm"
               />
               <p className="mx-auto max-w-sm text-2xs leading-relaxed text-ink-faint">
-                Downloading the server and generating the world can take a couple
-                of minutes on a first run. You can leave this window open —
-                closing CraftPanel now would cancel it.
+                {loader === "spigot"
+                  ? "Spigot has to be compiled on this machine via BuildTools — that's real work, not a download, so this can take 10–20 minutes. You can leave this window open — closing CraftPanel now would cancel it."
+                  : "Downloading the server and generating the world can take a couple of minutes on a first run. You can leave this window open — closing CraftPanel now would cancel it."}
               </p>
               <ErrorBanner
                 message={error}
@@ -630,6 +650,16 @@ export function CreateServerModal({
           ) : step === 1 ? (
             /* ── 2. version ─────────────────────────────────────── */
             <div className="space-y-3">
+              {pinnedVersions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-2xs font-medium text-ink-faint">Popular:</span>
+                  {pinnedVersions.map((p) => (
+                    <Pill key={p.id} active={versionId === p.id} onClick={() => setVersionId(p.id)}>
+                      {p.label}
+                    </Pill>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <TextInput
                   autoFocus

@@ -6,7 +6,6 @@ import type {
   DoctorReport,
   JavaInfo,
   ProvisionProgress,
-  R2Status,
   RemoteApiStatus,
   UpdateCheck,
 } from "../types";
@@ -26,25 +25,23 @@ import {
   type TabDef,
 } from "./ui";
 import { Icon } from "./Icon";
-import { R2SetupModal } from "./R2SetupModal";
 
 const DEFAULTS: AppSettings = {
   defaultJava: "",
   defaultRamMb: 4096,
   expertMode: false,
   keepServersOnQuit: false,
-  discordWebhookUrl: "",
   stayAwakeOnPower: false,
 };
 
-type Tab = "general" | "account" | "updates" | "java" | "cloud" | "diagnostics" | "about";
+type Tab = "general" | "account" | "updates" | "java" | "backups" | "diagnostics" | "about";
 
 const TABS: TabDef[] = [
   { id: "general", label: "General", icon: "sliders" },
   { id: "account", label: "Account", icon: "user" },
   { id: "updates", label: "Updates", icon: "download" },
   { id: "java", label: "Java", icon: "cpu" },
-  { id: "cloud", label: "Cloud & Backups", icon: "cloud" },
+  { id: "backups", label: "Backups", icon: "archive" },
   { id: "diagnostics", label: "Diagnostics", icon: "activity" },
   { id: "about", label: "About", icon: "info" },
 ];
@@ -153,9 +150,9 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
             <JavaTab s={s} set={set} />
           </div>
         )}
-        {visited.has("cloud") && (
-          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "cloud" && "hidden")}>
-            <CloudTab />
+        {visited.has("backups") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "backups" && "hidden")}>
+            <BackupsTab />
           </div>
         )}
         {visited.has("diagnostics") && (
@@ -243,57 +240,7 @@ function GeneralTab({
         <Toggle checked={s.expertMode} onChange={(v) => set("expertMode", v)} />
       </label>
     </Card>
-    <DiscordCard s={s} set={set} />
     </>
-  );
-}
-
-function DiscordCard({
-  s,
-  set,
-}: {
-  s: AppSettings;
-  set: <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => void;
-}) {
-  const [testing, setTesting] = useState(false);
-
-  async function sendTest() {
-    setTesting(true);
-    try {
-      await api.discordTestWebhook(s.discordWebhookUrl);
-      toast.ok("Sent — check the channel.");
-    } catch (e) {
-      toast.bad("Couldn't reach that webhook", String(e));
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <Card
-      title="Discord notifications"
-      icon="bell"
-      className="mt-4"
-      description="Pings a Discord channel when a server crashes, stops on its own, starts lagging (below 15 tps), or a scheduled backup fails — the things worth knowing about away from the app. Quiet on purpose otherwise: no ping for a normal Stop, and no daily 'backup done' spam."
-    >
-      <Field label="Webhook URL" hint="Discord channel → Edit Channel → Integrations → Webhooks → New/Copy Webhook URL.">
-        <TextInput
-          value={s.discordWebhookUrl}
-          onChange={(e) => set("discordWebhookUrl", e.target.value)}
-          placeholder="https://discord.com/api/webhooks/…"
-        />
-      </Field>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-2"
-        loading={testing}
-        disabled={!s.discordWebhookUrl.trim()}
-        onClick={sendTest}
-      >
-        Send test message
-      </Button>
-    </Card>
   );
 }
 
@@ -516,33 +463,12 @@ function JavaTab({
 
 /* ─────────────────────────── Cloud & Backups ──────────────────────────── */
 
-function CloudTab() {
-  const [r2, setR2] = useState<R2Status | null>(null);
-  const [showR2Setup, setShowR2Setup] = useState(false);
-  const [checking, setChecking] = useState(false);
+function BackupsTab() {
   const [backupsCfg, setBackupsCfg] = useState<BackupsConfig | null>(null);
 
-  const loadR2 = () => api.r2ConfigGet().then(setR2).catch(() => setR2(null));
-
   useEffect(() => {
-    loadR2();
     api.getBackupsConfig().then(setBackupsCfg).catch(() => {});
   }, []);
-
-  async function disconnect() {
-    if (!confirm("Disconnect Cloudflare R2? Cloud world-sync and cloud backups will stop working until you reconnect.")) {
-      return;
-    }
-    await api.r2ConfigClear();
-    await loadR2();
-    toast.ok("Disconnected from R2");
-  }
-
-  async function recheck() {
-    setChecking(true);
-    await loadR2();
-    setChecking(false);
-  }
 
   async function saveKeep(n: number) {
     const v = Math.max(0, Math.min(1000, Math.floor(n)));
@@ -555,87 +481,25 @@ function CloudTab() {
   }
 
   return (
-    <>
-      <Card
-        title="Cloud sync (Cloudflare R2)"
-        icon="cloud"
-        description="Powers cross-device world sync and, once a server opts in, pushing its scheduled backups off this machine too."
-        right={
-          r2?.configured ? (
-            <Badge tone="ok" dot>
-              Connected
-            </Badge>
-          ) : (
-            <Badge tone="neutral">Not set up</Badge>
-          )
-        }
-      >
-        {r2?.configured && r2.config ? (
-          <div className="space-y-2">
-            <div className="rounded-lg border border-line-soft bg-surface-2 px-3 py-2.5 text-2xs text-ink-dim">
-              <div>
-                <span className="text-ink-faint">Account:</span> {r2.config.accountId}
-              </div>
-              <div>
-                <span className="text-ink-faint">Bucket:</span> {r2.config.bucket}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" disabled={checking} onClick={recheck}>
-                {checking ? "Checking…" : "Verify connection"}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setShowR2Setup(true)}>
-                Reconfigure
-              </Button>
-              <Button variant="danger" size="sm" onClick={disconnect}>
-                Disconnect
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" icon="cloud" onClick={() => setShowR2Setup(true)}>
-              Set up cloud sync
-            </Button>
-            <span className="text-2xs text-ink-faint">
-              Needs a free Cloudflare R2 bucket + API token.
-            </span>
-          </div>
-        )}
-      </Card>
-
-      <Card
-        title="Local backup retention"
-        icon="archive"
-        description="Applies to every server — oldest backups get pruned first. Turned on per-server in its Backups tab."
-        className="mt-4"
-      >
-        <Field label="Keep newest" hint="0 = unlimited">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              max={1000}
-              value={backupsCfg?.keep ?? ""}
-              onChange={(e) => saveKeep(Number(e.target.value))}
-              className="w-24 rounded border border-line bg-surface-2 px-2 py-1.5 text-sm text-ink"
-            />
-            <span className="text-2xs text-ink-faint">backups per server</span>
-          </div>
-        </Field>
-      </Card>
-
-      {showR2Setup && (
-        <R2SetupModal
-          onClose={() => setShowR2Setup(false)}
-          onSaved={async () => {
-            setShowR2Setup(false);
-            await loadR2();
-            toast.ok("Connected to R2");
-          }}
-        />
-      )}
-    </>
+    <Card
+      title="Local backup retention"
+      icon="archive"
+      description="Applies to every server — oldest backups get pruned first. Turned on per-server in its Backups tab."
+    >
+      <Field label="Keep newest" hint="0 = unlimited">
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={1000}
+            value={backupsCfg?.keep ?? ""}
+            onChange={(e) => saveKeep(Number(e.target.value))}
+            className="w-24 rounded border border-line bg-surface-2 px-2 py-1.5 text-sm text-ink"
+          />
+          <span className="text-2xs text-ink-faint">backups per server</span>
+        </div>
+      </Field>
+    </Card>
   );
 }
 
@@ -660,7 +524,7 @@ function DiagnosticsTab() {
     <Card
       title="Health check"
       icon="activity"
-      description="Java, disk space, a free port, and cloud sync if you've set it up — catches the reasons a server might fail to create or start, before it fails."
+      description="Java, disk space, and a free port — catches the reasons a server might fail to create or start, before it fails."
       right={
         <Button variant="ghost" disabled={running} onClick={run}>
           {running ? "Checking…" : doctor ? "Run again" : "Run check"}

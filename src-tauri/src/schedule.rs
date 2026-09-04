@@ -40,10 +40,6 @@ pub struct Schedule {
     /// of (not instead of) `backup_on_stop` — a server that never stops
     /// otherwise never gets backed up. `None`/`0` = off.
     pub interval_backup_hours: Option<u32>,
-    /// push every backup this schedule takes (either trigger) to R2, once
-    /// it's uploaded locally. Silently skipped if R2 isn't configured —
-    /// this is a bonus on top of local backups, never a hard requirement.
-    pub cloud_backup: bool,
     /// minutes between automatic hardlink "Time Machine" snapshots while the
     /// server is running — cheap, frequent rollback points, distinct from
     /// the full zip `Backup`s above. `None`/`0` = off. Floored at 5 min.
@@ -71,7 +67,6 @@ impl Schedule {
             && self.timed_commands.is_empty()
             && !self.backup_on_stop
             && self.interval_backup_hours.unwrap_or(0) == 0
-            && !self.cloud_backup
             && self.snapshot_interval_mins.unwrap_or(0) == 0
     }
     fn max_restarts(&self) -> u32 {
@@ -186,10 +181,9 @@ impl Scheduler {
         );
     }
 
-    /// Take a local backup, prune locally, then — if `cloud_backup` is on
-    /// and R2 is configured — push it and prune the remote index too.
-    /// Runs on its own thread so a slow zip/upload never blocks the ticker.
-    fn run_backup(&self, id: &str, dir: &str, trigger: &str, cloud_backup: bool) {
+    /// Take a local backup, prune locally. Runs on its own thread so a
+    /// slow zip never blocks the ticker.
+    fn run_backup(&self, id: &str, dir: &str, trigger: &str) {
         let dir = dir.to_string();
         let id = id.to_string();
         let trigger = trigger.to_string();
@@ -202,37 +196,13 @@ impl Scheduler {
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(20);
             match crate::backups::backup_now(p, Some(&trigger), "scheduled", &|_| {}) {
-                Ok(meta) => {
+                Ok(_meta) => {
                     crate::backups::prune(p, keep);
                     let _ = app.emit(
                         "server:log",
                         serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
                             "text": "[scheduler] scheduled backup done" }),
                     );
-                    if cloud_backup {
-                        if let Some(cloud) = app.try_state::<std::sync::Arc<crate::cloud::CloudManager>>() {
-                            if cloud.is_configured() {
-                                match crate::backups::read_zip(p, &meta.id)
-                                    .and_then(|bytes| cloud.push_backup(&id, &meta, &bytes, keep))
-                                {
-                                    Ok(()) => {
-                                        let _ = app.emit(
-                                            "server:log",
-                                            serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
-                                                "text": "[scheduler] pushed backup to the cloud" }),
-                                        );
-                                    }
-                                    Err(e) => {
-                                        let _ = app.emit(
-                                            "server:log",
-                                            serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
-                                                "text": format!("[scheduler] cloud backup push failed: {e}") }),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
                 Err(e) => {
                     let _ = app.emit(
@@ -240,7 +210,6 @@ impl Scheduler {
                         serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
                             "text": format!("[scheduler] scheduled backup failed: {e}") }),
                     );
-                    notify_discord_backup_failed(&app, &id);
                 }
             }
         });
@@ -284,7 +253,6 @@ impl Scheduler {
                         serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
                             "text": format!("[scheduler] snapshot failed: {e}") }),
                     );
-                    notify_discord_snapshot_failed(&app, &id);
                 }
             }
         });
@@ -314,7 +282,7 @@ impl Scheduler {
             {
                 drop(st);
                 self.console(&rec.id, "server stopped — taking a scheduled backup");
-                self.run_backup(&rec.id, &rec.path, "on stop", sch.cloud_backup);
+                self.run_backup(&rec.id, &rec.path, "on stop");
                 continue;
             }
 
@@ -382,7 +350,7 @@ impl Scheduler {
                         ds.last_interval_backup = now_epoch;
                         drop(st);
                         self.console(&rec.id, &format!("scheduled backup (every {hours}h)"));
-                        self.run_backup(&rec.id, &rec.path, "scheduled", sch.cloud_backup);
+                        self.run_backup(&rec.id, &rec.path, "scheduled");
                         continue;
                     }
                 }
@@ -457,42 +425,6 @@ impl Scheduler {
     }
 }
 
-/// Only called on backup *failure* — a daily/hourly "backup done" ping for
-/// every server gets old fast and trains people to ignore the channel.
-/// Failure is rare and actually worth knowing about away from the app.
-fn notify_discord_backup_failed(app: &AppHandle, server_id: &str) {
-    let Some(db) = app.try_state::<Db>() else { return };
-    let url = crate::commands::read_app_settings(&db).discord_webhook_url;
-    let url = url.trim();
-    if url.is_empty() {
-        return;
-    }
-    let name = db
-        .get_server(server_id)
-        .ok()
-        .flatten()
-        .map(|r| r.name)
-        .unwrap_or_else(|| server_id.to_string());
-    crate::discord::notify(url, format!("🟠 **{name}** scheduled backup failed — check the console."));
-}
-
-/// Same reasoning as `notify_discord_backup_failed` — only pings on
-/// failure, snapshots are frequent enough that a success ping would be noise.
-fn notify_discord_snapshot_failed(app: &AppHandle, server_id: &str) {
-    let Some(db) = app.try_state::<Db>() else { return };
-    let url = crate::commands::read_app_settings(&db).discord_webhook_url;
-    let url = url.trim();
-    if url.is_empty() {
-        return;
-    }
-    let name = db
-        .get_server(server_id)
-        .ok()
-        .flatten()
-        .map(|r| r.name)
-        .unwrap_or_else(|| server_id.to_string());
-    crate::discord::notify(url, format!("🟠 **{name}** scheduled snapshot failed — check the console."));
-}
 
 #[cfg(test)]
 mod tests {
@@ -502,7 +434,6 @@ mod tests {
     fn is_default_accounts_for_the_new_backup_fields() {
         assert!(Schedule::default().is_default());
         assert!(!Schedule { interval_backup_hours: Some(6), ..Default::default() }.is_default());
-        assert!(!Schedule { cloud_backup: true, ..Default::default() }.is_default());
         assert!(!Schedule { scheduled_start: Some("06:00".into()), ..Default::default() }.is_default());
         // 0 hours is the same as "off", same as None
         assert!(Schedule { interval_backup_hours: Some(0), ..Default::default() }.is_default());
@@ -540,7 +471,6 @@ mod tests {
             daily_restart: Some("04:30".into()),
             backup_on_stop: true,
             interval_backup_hours: Some(12),
-            cloud_backup: true,
             timed_commands: vec![TimedCommand { at: "03:00".into(), command: "save-all".into() }],
             ..Default::default()
         };
@@ -550,7 +480,6 @@ mod tests {
         assert_eq!(back.daily_restart.as_deref(), Some("04:30"));
         assert_eq!(back.timed_commands.len(), 1);
         assert_eq!(back.interval_backup_hours, Some(12));
-        assert!(back.cloud_backup);
 
         s.daily_restart = Some("99:99".into());
         assert!(write(&db, "srv1", &s).is_err());

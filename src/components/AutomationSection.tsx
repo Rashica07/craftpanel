@@ -13,7 +13,6 @@ const EMPTY: Schedule = {
   timedCommands: [],
   backupOnStop: false,
   intervalBackupHours: null,
-  cloudBackup: false,
   snapshotIntervalMins: null,
   snapshotKeepRecentHours: 24,
   snapshotKeepDailyDays: 30,
@@ -226,23 +225,6 @@ export function AutomationSection({ serverId }: { serverId: string }) {
           </div>
         )}
       </div>
-
-      <label className="mt-2.5 flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={sch.cloudBackup}
-          onChange={(e) => set("cloudBackup", e.target.checked)}
-          className="mt-0.5 accent-accent"
-        />
-        <span>
-          Also push every scheduled backup to the cloud
-          <span className="mt-0.5 block text-2xs text-ink-faint">
-            Needs Cloud sync (R2) set up in CraftPanel settings — silently
-            skipped otherwise. Off-machine, in case this computer's disk
-            goes with it.
-          </span>
-        </span>
-      </label>
 
       <div className="mt-3 border-t border-line pt-2">
         <div className="mb-1 text-2xs uppercase tracking-wide text-ink-faint">

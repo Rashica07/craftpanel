@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import {
   SERVER_TYPE_META,
   STATUS_META,
-  type CloudStatus,
   type CrashReport,
   type ExternalStatus,
   type ProcSnapshot,
@@ -41,7 +40,7 @@ import { ServerMetricsHistory } from "./ServerMetricsHistory";
 import { SecuritySection } from "./SecuritySection";
 import { HealthStrip } from "./HealthStrip";
 import { Icon } from "./Icon";
-import { cloudLeaseLabel, leaseLabel } from "./ShareSection";
+import { leaseLabel } from "./ShareSection";
 import { STATUS_TONE } from "../App";
 import { ChangeVersionModal } from "./ChangeVersionModal";
 import { CloneServerModal } from "./CloneServerModal";
@@ -197,15 +196,12 @@ export function ServerDetail({
   const [consoleMode, setConsoleMode] = useState<"live" | "log">("live");
   const [pendingRestart, setPendingRestart] = useState(false);
   const [share, setShare] = useState<ShareView | null>(null);
-  const [cloud, setCloud] = useState<CloudStatus | null>(null);
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [crash, setCrash] = useState<CrashReport | null>(null);
   const [crashDismissed, setCrashDismissed] = useState(false);
   const [suspectDisabled, setSuspectDisabled] = useState(false);
   const [disablingSuspect, setDisablingSuspect] = useState(false);
   const [showChangeVersion, setShowChangeVersion] = useState(false);
   const [showClone, setShowClone] = useState(false);
-  const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const status = runtime?.status ?? "stopped";
   const active =
@@ -219,11 +215,7 @@ export function ServerDetail({
   // — Players, Add-ons and Worlds don't apply to a native Bedrock server.
   // Console and Settings both still work (stdin passthrough, server.properties).
   const isBedrock = server.server_type === "bedrock";
-  const isCloud = !!server.sync_code;
-  const leasedElsewhere =
-    !active &&
-    ((!!share?.shared && !!share.locked && !share.heldByUs) ||
-      (isCloud && !!cloud?.locked && !cloud.heldByUs));
+  const leasedElsewhere = !active && !!share?.shared && !!share.locked && !share.heldByUs;
 
   useEffect(() => {
     setTab(initialTab ?? "console");
@@ -318,12 +310,6 @@ export function ServerDetail({
         .shareStatus(server.id)
         .then((s) => alive && setShare(s))
         .catch(() => {});
-      if (server.sync_code) {
-        api
-          .cloudStatus(server.id)
-          .then((c) => alive && setCloud(c))
-          .catch(() => {});
-      }
     };
     check();
     const t = setInterval(check, 8000);
@@ -331,31 +317,7 @@ export function ServerDetail({
       alive = false;
       clearInterval(t);
     };
-  }, [server.id, server.sync_code, active]);
-
-  // sync progress toast + auto "finish" (upload world) after a cloud server stops
-  useEffect(() => {
-    let un: (() => void) | undefined;
-    api
-      .onSyncProgress((p) => {
-        if (!p.serverId || p.serverId === server.id) {
-          setSyncMsg(p.message);
-          clearTimeout(syncTimer.current);
-          syncTimer.current = setTimeout(() => setSyncMsg(null), 4000);
-        }
-      })
-      .then((f) => (un = f));
-    return () => {
-      un?.();
-      clearTimeout(syncTimer.current);
-    };
-  }, [server.id]);
-
-  useEffect(() => {
-    if (isCloud && (status === "stopped" || status === "crashed")) {
-      api.cloudFinish(server.id).catch(() => {});
-    }
-  }, [isCloud, status, server.id]);
+  }, [server.id, active]);
 
   const meta = SERVER_TYPE_META[server.server_type];
   const st = STATUS_META[status];
@@ -438,12 +400,7 @@ export function ServerDetail({
                   </Badge>
                 </Tooltip>
               )}
-              {isCloud && cloud && (
-                <Badge tone={cloudLeaseLabel(cloud).tone} icon="cloud">
-                  {cloudLeaseLabel(cloud).text}
-                </Badge>
-              )}
-              {!isCloud && share?.shared && (
+              {share?.shared && (
                 <Badge tone={leaseLabel(share).tone} icon="share">
                   {leaseLabel(share).text}
                 </Badge>
@@ -563,7 +520,6 @@ export function ServerDetail({
         externalRunning ||
         runtime?.needsEula ||
         (status === "crashed" && !crashDismissed) ||
-        syncMsg ||
         (pendingRestart && (active || externalRunning)) ||
         error) && (
         <div className="shrink-0 space-y-2 px-6 pt-4">
@@ -758,12 +714,6 @@ export function ServerDetail({
               ) : (
                 "Check the Console tab for the last few lines before it went down."
               )}
-            </Banner>
-          )}
-
-          {syncMsg && (
-            <Banner tone="info" icon="cloud">
-              {syncMsg}
             </Banner>
           )}
 

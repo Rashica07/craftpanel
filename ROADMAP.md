@@ -1884,6 +1884,69 @@ new live/ignored test confirming `gallery()` returns real
 frontend-only changes), `npx tsc --noEmit`, `npm run build` all clean at
 v2.8.1.
 
+## Batch 33 — cloud sync removed, Spigot via BuildTools, Skyblock fix (v2.9.0, 2026-09-04)
+
+- **Bugfix — Time Machine snapshot selection could silently drift away
+  from "latest" with nothing on screen saying so.** The real incident:
+  someone was about to restore a 17-hour-old snapshot believing it was
+  current, because [SnapshotTimeline.tsx](src/components/SnapshotTimeline.tsx)
+  deliberately keeps your selection put across reloads (so inspecting an
+  old tick doesn't get yanked out from under you as new snapshots keep
+  arriving) but never showed that you'd drifted off the latest one. Now
+  the latest tick is visually marked, a "not the latest" badge appears
+  the moment you're not on it, and a one-click "Jump to latest" sits
+  right next to the badge.
+- **Cloud sync (Cloudflare R2) and Discord webhook notifications removed
+  entirely** — not deferred, scratched outright. This app is meant for
+  public distribution with zero setup: users should never need to submit
+  their own API keys, webhooks, or cloud credentials just to use it.
+  `cloud.rs`, `r2.rs`, `sync.rs`, `discord.rs`, `R2SetupModal.tsx` deleted;
+  every settings/backups/share surface that referenced them stripped back
+  to what still applies (local synced-folder sharing stays — it needs no
+  external account). `rusty-s3` dropped from `Cargo.toml` as an
+  now-unused dependency.
+- **CurseForge search now actually works in the app** — the API key
+  CurseForge issues is scoped to the *application* CraftPanel, not to
+  individual users (confirmed via CurseForge's own approval email), so
+  it's embedded as a constant (`curseforge.rs`) instead of a Settings
+  field nobody should ever have had to fill in. `BrowsePanel.tsx` gained
+  a real Modrinth/CurseForge source toggle wired to it.
+- **Bugfix — the Skyblock quick-start template (and any other
+  plugin-backed template) could pick a Paper version its own plugin
+  hadn't published a build for yet**, failing with a confusing error every
+  time. `TemplateModal.tsx` now intersects the plugin's actually-published
+  versions against available Paper releases and picks the newest version
+  both agree on, instead of blindly grabbing the newest Paper release and
+  hoping the plugin caught up.
+- **Bugfix — Paper's version list could show up in scrambled order** (an
+  older MC version family appearing after a newer one), because Paper's
+  own API groups versions by family in a map whose iteration order isn't
+  numeric. Every version now sorts newest-first by parsed version number
+  regardless of what order the API handed families back in — this also
+  fixes the "Latest" badge, which reads off the same sorted list and was
+  pointing at the wrong version whenever the order was scrambled.
+- **Popular version quick-picks** — a "1.8.9" / "Latest (x.y.z)" chip row
+  above the version search in the create-server wizard, computed fresh
+  each time rather than hardcoded, only shown when the selected loader's
+  own version list actually has a match.
+- **Spigot added as a full server flavour** — the one loader with no
+  downloadable jar anywhere; its license requires everyone to compile
+  their own via Mojang/Spigot's `BuildTools.jar`. CraftPanel now runs it
+  end-to-end: downloads BuildTools, checks for `git` up front with a
+  clear error instead of failing deep into an opaque Maven log, compiles
+  with `--compile SPIGOT` (skips the unused CraftBukkit build), streams
+  live progress through the existing create-server progress channel, and
+  cleans up the multi-hundred-MB work directory afterward either way.
+  Version list reuses Mojang's manifest filtered to release + 1.8-onward
+  (BuildTools' real supported range, the reboot point after the 2014
+  Bukkit/Spigot DMCA affair). This is a real several-minute *compile*,
+  not a download — flagged plainly in the wizard's own copy.
+
+**Verified:** `cargo build --lib`, `cargo test --lib` 153 passed (0
+failed, 19 ignored — including new live/ignored tests confirming Spigot's
+version list is real and correctly filtered), `npx tsc --noEmit`,
+`npm run build` all clean at v2.9.0.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.
