@@ -73,6 +73,76 @@ pub fn required_java_for_mc(mc_version: &str) -> u32 {
     }
 }
 
+/// Finds an already-installed JDK matching `required_major`, without
+/// needing the user to hunt one down and paste a path by hand — the real
+/// gap this closes: someone installs a matching JDK (e.g. via Adoptium's
+/// own installer, following exactly the advice CraftPanel's own error
+/// message gives), and the app still didn't pick it up, because a bare
+/// `java` on PATH keeps resolving to whatever the system's *default* JVM
+/// is, not whatever was just installed alongside it — normal multi-JDK
+/// behavior on every OS, just not obvious.
+///
+/// macOS asks the OS's own JVM registry (`/usr/libexec/java_home`) rather
+/// than guessing install paths — the same tool `java_home` itself uses,
+/// so it finds anything any installer (Adoptium, Oracle, Homebrew's cask,
+/// SDKMAN, …) registered, not just one vendor's layout. Windows has no
+/// equivalent registry query, so it scans the handful of real install
+/// roots every mainstream JDK installer actually uses. Every candidate is
+/// verified with a real `probe()` before being trusted — a stale
+/// directory name is never good enough on its own.
+pub fn find_compatible_java(required_major: u32) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        for spec in [required_major.to_string(), format!("1.{required_major}")] {
+            let out = Command::new("/usr/libexec/java_home").arg("-v").arg(&spec).output().ok()?;
+            if !out.status.success() {
+                continue;
+            }
+            let home = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if home.is_empty() {
+                continue;
+            }
+            let candidate = format!("{home}/bin/java");
+            if let Some(info) = probe(Some(&candidate)) {
+                if info.major == required_major {
+                    return Some(candidate);
+                }
+            }
+        }
+        return None;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let roots = [
+            r"C:\Program Files\Eclipse Adoptium",
+            r"C:\Program Files\Java",
+            r"C:\Program Files (x86)\Eclipse Adoptium",
+            r"C:\Program Files (x86)\Java",
+        ];
+        for root in roots {
+            let Ok(entries) = std::fs::read_dir(root) else { continue };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let candidate = entry.path().join("bin").join("java.exe");
+                if !candidate.is_file() {
+                    continue;
+                }
+                if let Some(info) = probe(candidate.to_str()) {
+                    if info.major == required_major {
+                        return Some(candidate.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
+    #[allow(unreachable_code)]
+    {
+        None
+    }
+}
+
 /// Human-readable compatibility note, or `None` if the pairing is fine.
 pub fn compatibility_warning(java: &JavaInfo, mc_version: Option<&str>) -> Option<String> {
     let mc = mc_version?;
@@ -129,6 +199,30 @@ mod tests {
         // the year-based scheme that replaced "1.x" starting in 2026
         assert_eq!(required_java_for_mc("26.0"), 25);
         assert_eq!(required_java_for_mc("26.1"), 25);
+    }
+
+    /// Not asserting a *found* JDK — that depends entirely on what's
+    /// actually installed on whatever machine runs this test. Just that
+    /// asking for something that can never exist returns `None` cleanly
+    /// rather than panicking (a bad `java_home`/directory-scan parse is
+    /// exactly the kind of thing that should degrade to "didn't find
+    /// one," never crash the whole create-server flow).
+    #[test]
+    fn find_compatible_java_returns_none_for_an_impossible_version() {
+        assert!(find_compatible_java(3).is_none());
+    }
+
+    /// The real happy path — machine-dependent (needs a real JDK matching
+    /// `probe(None)`'s own major installed), so `#[ignore]`d like this
+    /// file's other environment-dependent tests. Confirms this actually
+    /// finds a real, working `java` binary, not just returns *a* string.
+    #[test]
+    #[ignore]
+    fn find_compatible_java_locates_the_currently_running_jdk() {
+        let mine = probe(None).expect("this machine needs a java on PATH to run this test");
+        let found = find_compatible_java(mine.major).expect("should find the JDK that's clearly installed");
+        let info = probe(Some(&found)).expect("the path found should itself be a working java");
+        assert_eq!(info.major, mine.major);
     }
 
     #[test]

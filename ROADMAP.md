@@ -1972,10 +1972,23 @@ v2.8.1.
     nearest release in the same major.minor family — 1.8.8 and 1.8.9
     share the exact same network protocol, so this is the real,
     standard way "1.8.9 servers" are actually run, not a workaround.
+  - **The Java-8-gate error told people to "point the Java path at it,"
+    and that was real friction** — installing a second JDK alongside an
+    existing one doesn't make a bare `java` on PATH resolve to it, on any
+    OS, so the instruction technically worked but nobody could tell what
+    path to actually type. New `java::find_compatible_java` in `java.rs`
+    asks the OS's own JVM registry (`/usr/libexec/java_home` on macOS,
+    scans the real installer roots on Windows) for a JDK matching what
+    the target Minecraft version actually needs, and `build_spigot` now
+    uses it automatically — install the JDK, nothing else to configure.
+    Confirmed live end-to-end on this machine: `find_compatible_java`
+    genuinely locates and verifies the real, running JDK via
+    `/usr/libexec/java_home`, not just plausible-looking code.
 
-**Verified:** `cargo build --lib`, `cargo test --lib` 153 passed (0
-failed, 19 ignored — including new live/ignored tests confirming Spigot's
-version list is real and correctly filtered), `npx tsc --noEmit`,
+**Verified:** `cargo build --lib`, `cargo test --lib` 154 passed (0
+failed, 20 ignored — including new live/ignored tests confirming
+Spigot's version list is real and correctly filtered, and that
+`find_compatible_java` locates a real installed JDK), `npx tsc --noEmit`,
 `npm run build` all clean at v2.9.0.
 
 ## Other future ideas — sized, not yet scheduled

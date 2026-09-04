@@ -640,6 +640,31 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
         return Err("BuildTools needs git installed to compile Spigot — on macOS, run `xcode-select --install` (or install Xcode) to get it, then try again.".into());
     }
 
+    // Old Minecraft versions need the JDK that was actually current when
+    // they shipped — BuildTools enforces this itself (confirmed live: it
+    // refuses outright rather than trying and failing weirdly). Rather
+    // than pass through whatever `java` this server happens to be
+    // configured with (almost always a modern one, since that's what
+    // runs the actual server jar) and let BuildTools reject it, look for
+    // a matching JDK the user may have separately installed — the real
+    // gap this closes: a bare `java` on PATH doesn't automatically start
+    // pointing at a JDK you just installed alongside your existing one.
+    // Falls back to the passed-in `java` untouched if nothing better is
+    // found, so this only ever helps, never blocks a build that would've
+    // worked anyway.
+    let required_java = crate::java::required_java_for_mc(&spec.mc_version);
+    let build_java = match crate::java::find_compatible_java(required_java) {
+        Some(found) => {
+            progress(Progress {
+                stage: "build".into(),
+                message: format!("Found a Java {required_java} runtime installed — using it to compile Spigot {}.", spec.mc_version),
+                pct: None,
+            });
+            found
+        }
+        None => java.to_string(),
+    };
+
     let work = dir.join(".buildtools");
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let jar_path = work.join("BuildTools.jar");
@@ -657,7 +682,7 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
     });
 
     let result = (|| -> Result<String, String> {
-        let mut child = Command::new(java)
+        let mut child = Command::new(&build_java)
             .current_dir(&work)
             .args(["-jar", "BuildTools.jar", "--rev", &spec.mc_version, "--output-dir"])
             .arg(dir)
@@ -746,14 +771,16 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
             // actually current when they shipped — confirmed live: Java 25
             // building 1.8.8 fails immediately with this exact line, before
             // ever touching Mojang/Spigot source. CraftPanel deliberately
-            // doesn't auto-install Java 8 (see `javainstall.rs`'s own doc
+            // doesn't auto-*install* Java 8 (see `javainstall.rs`'s own doc
             // comment — substituting a newer JVM under genuinely old
-            // software is its own can of worms), so the real fix is
-            // "install that JDK yourself and point the Java path field at
-            // it," not anything CraftPanel can paper over automatically.
+            // software is its own can of worms), but it does now
+            // auto-*detect* one if it's already on the machine (see
+            // `find_compatible_java` above) — reaching this branch means
+            // that search already ran and came up empty, so the real fix
+            // is installing that JDK, not pasting a path anywhere by hand.
             if let Some(gate) = tail.iter().find(|l| l.contains("requires Java versions between")) {
                 return Err(format!(
-                    "{}. Install a matching JDK yourself, then point this server's Java path at it (CraftPanel doesn't auto-install old JDKs — see Settings → Default Java, or set it in this wizard).\n\nFull output:\n{full_tail}",
+                    "{}. CraftPanel looked for an already-installed Java {required_java} and didn't find one — install one (Adoptium/Temurin publishes archived builds for every version) and try again; CraftPanel will pick it up automatically, no path to paste in.\n\nFull output:\n{full_tail}",
                     gate.trim_start_matches('*').trim()
                 ));
             }

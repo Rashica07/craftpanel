@@ -58,7 +58,7 @@ const RULES: Rule[] = [
     id: "buildtools-java",
     test: /requires java versions between/i,
     title: "This Spigot version needs an older Java",
-    hint: "Old Minecraft versions were built against whatever Java was current back then. Install a matching JDK yourself (Adoptium/Temurin publishes archived builds for every version) and point this server's Java path at it — CraftPanel doesn't auto-install anything older than Java 17.",
+    hint: "Old Minecraft versions were built against whatever Java was current back then. CraftPanel already looked for one installed on this machine and didn't find it — install a matching JDK (Adoptium/Temurin publishes archived builds for every version) and try again. No path to paste in — it's picked up automatically.",
     icon: "download",
   },
   {
