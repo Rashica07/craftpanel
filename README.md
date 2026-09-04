@@ -121,7 +121,8 @@ installers for macOS and Windows via GitHub Actions.
 This application and all associated code are the exclusive property of kiqa-dev.it. The design, implementation, and intellectual property rights are held by kiqa-dev.it.
 
 **This project has no association with other kiqa-dev.it co-founded companies**, including:
-- [Traversar](https://traversar-vercel.app)
+- [Traversar](https://traversar-liart.
+  vercel.app)
 - [SpinD](https://spindare.it)
 
 ---
