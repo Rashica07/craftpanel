@@ -1962,6 +1962,16 @@ v2.8.1.
     instead of a generic "check your JDK" hint that would've been
     actively misleading (a real, working, modern JDK is exactly the
     problem for a pre-~1.12 version).
+  - **The 1.8.9 gap is also real on Paper** (same Spigot BuildData
+    lineage — confirmed live, Paper's own version list has 1.8.8, not
+    1.8.9 either), so the wizard now handles the substitution directly
+    instead of leaving people to discover it by trial and error: the
+    "1.8.9" pin falls back to the newest same-family release and labels
+    itself honestly ("1.8.9 → 1.8.8"), and searching an exact version
+    that doesn't exist offers a one-click "Use X instead" for the
+    nearest release in the same major.minor family — 1.8.8 and 1.8.9
+    share the exact same network protocol, so this is the real,
+    standard way "1.8.9 servers" are actually run, not a workaround.
 
 **Verified:** `cargo build --lib`, `cargo test --lib` 153 passed (0
 failed, 19 ignored — including new live/ignored tests confirming Spigot's

@@ -67,6 +67,11 @@ const DIFFICULTIES = [
  * Forge "1.20.1-47.2.0" -> "1.20.1" (MC version is the prefix).
  * NeoForge "21.1.172" -> "1.21.1"; year-scheme "26.2.5" -> "26.2".
  */
+/** Same major.minor family, e.g. "1.8" for both "1.8.9" and "1.8.8". */
+function versionFamily(id: string): string {
+  return id.split(/[-+]/)[0].split(".").slice(0, 2).join(".");
+}
+
 function deriveMcVersion(loader: Loader, versionId: string): string {
   if (loader === "forge") return versionId.split("-")[0];
   if (loader === "neoforge") {
@@ -256,21 +261,53 @@ export function CreateServerModal({
     if (!versionId && visibleVersions.length) setVersionId(visibleVersions[0].id);
   }, [visibleVersions, versionId]);
 
+  /** When a search for an exact version turns up nothing, offer the
+   * newest release in the same major.minor family instead of just "no
+   * results" — the same substitution the 1.8.9 pin above makes, applied
+   * generally so any other Paper/Spigot point-release gap (not every
+   * Mojang patch got its own Spigot build) gets a real, actionable
+   * answer instead of a dead end. */
+  const nearestForQuery = useMemo(() => {
+    if (!versions?.length || visibleVersions.length > 0) return null;
+    const q = versionQuery.trim();
+    if (!/^\d+\.\d+/.test(q)) return null;
+    const family = versionFamily(q);
+    const releases = versions.filter((v) => v.kind === "release" && versionFamily(v.id) === family);
+    return releases[0] ?? null;
+  }, [versions, visibleVersions, versionQuery]);
+
   /** One-click shortcuts for the two versions people actually ask for by
    * name: 1.8.9 (the long-running PvP/Hypixel-era version) and whatever
    * the newest stable release currently is — computed fresh from the
    * sorted list each time, never a hardcoded version string, so it never
    * goes stale as new Minecraft versions ship. Only shown when that
    * loader's own version list actually has a match (e.g. Fabric doesn't
-   * go back to 1.8.9, so no chip for it there). */
+   * go back to 1.8.9, so no chip for it there).
+   *
+   * 1.8.9 itself is a real gap on Paper/Spigot specifically — it was a
+   * client-only Mojang patch (server byte-identical to 1.8.8's), so
+   * neither ever published separate build data for it. Rather than just
+   * silently omit the chip and leave someone hunting for a version that
+   * will never appear, fall back to the newest same-family release
+   * (1.8.8) and label the chip honestly about the substitution — 1.8.8
+   * and 1.8.9 share the exact same network protocol, so a 1.8.9 client
+   * connects to a 1.8.8 server with zero compatibility issues; this is
+   * the real, standard way "1.8.9 servers" are actually run. */
   const pinnedVersions = useMemo(() => {
     if (!versions?.length) return [];
     const releases = versions.filter((v) => v.kind === "release");
     const pins: { label: string; id: string }[] = [];
     const classic = releases.find((v) => v.id === "1.8.9");
-    if (classic) pins.push({ label: "1.8.9", id: classic.id });
+    if (classic) {
+      pins.push({ label: "1.8.9", id: classic.id });
+    } else {
+      const nearest = releases.find((v) => versionFamily(v.id) === "1.8");
+      if (nearest) pins.push({ label: `1.8.9 → ${nearest.id}`, id: nearest.id });
+    }
     const latest = releases[0];
-    if (latest && latest.id !== classic?.id) pins.push({ label: `Latest (${latest.id})`, id: latest.id });
+    if (latest && latest.id !== (classic ?? releases.find((v) => versionFamily(v.id) === "1.8"))?.id) {
+      pins.push({ label: `Latest (${latest.id})`, id: latest.id });
+    }
     return pins;
   }, [versions]);
 
@@ -710,9 +747,28 @@ export function CreateServerModal({
                   icon="search"
                   title="No versions match"
                   message={
-                    versionQuery
-                      ? `Nothing called “${versionQuery}”. Try a shorter search.`
-                      : "Turn on snapshots to see pre-release builds."
+                    nearestForQuery ? (
+                      <>
+                        {LOADER_META[loader].label} doesn't have a “{versionQuery}” build — some Minecraft
+                        point releases never got one (often a client-only patch with an identical server).
+                        {" "}
+                        <button
+                          type="button"
+                          className="text-accent-soft hover:underline"
+                          onClick={() => {
+                            setVersionQuery("");
+                            setVersionId(nearestForQuery.id);
+                          }}
+                        >
+                          Use {nearestForQuery.id} instead
+                        </button>
+                        {" "}— same version family, and player-compatible.
+                      </>
+                    ) : versionQuery ? (
+                      `Nothing called “${versionQuery}”. Try a shorter search.`
+                    ) : (
+                      "Turn on snapshots to see pre-release builds."
+                    )
                   }
                   compact
                 />
