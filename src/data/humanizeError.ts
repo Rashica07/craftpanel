@@ -55,6 +55,27 @@ const RULES: Rule[] = [
     icon: "download",
   },
   {
+    id: "buildtools-java",
+    test: /requires java versions between/i,
+    title: "This Spigot version needs an older Java",
+    hint: "Old Minecraft versions were built against whatever Java was current back then. Install a matching JDK yourself (Adoptium/Temurin publishes archived builds for every version) and point this server's Java path at it — CraftPanel doesn't auto-install anything older than Java 17.",
+    icon: "download",
+  },
+  {
+    id: "buildtools-no-version",
+    test: /no build data for/i,
+    title: "Spigot doesn't have that exact version",
+    hint: "Some Minecraft point releases were client-only patches with no separate server build. Try the version just below it in the picker instead.",
+    icon: "alert",
+  },
+  {
+    id: "buildtools",
+    test: /buildtools (failed|didn't finish)/i,
+    title: "Spigot couldn't be compiled",
+    hint: "BuildTools needs a full JDK (not just a JRE) and a solid internet connection — it downloads and builds Minecraft's own source. Check \"Show technical details\" below for exactly where it stopped.",
+    icon: "alert-octagon",
+  },
+  {
     id: "port",
     test: /address already in use|port.*(in use|already bound)|os error 4?8\b|os error 98\b|os error 1004[89]\b/i,
     title: "Something else is already using this port",

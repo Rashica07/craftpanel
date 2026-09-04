@@ -1937,10 +1937,31 @@ v2.8.1.
   with `--compile SPIGOT` (skips the unused CraftBukkit build), streams
   live progress through the existing create-server progress channel, and
   cleans up the multi-hundred-MB work directory afterward either way.
-  Version list reuses Mojang's manifest filtered to release + 1.8-onward
-  (BuildTools' real supported range, the reboot point after the 2014
-  Bukkit/Spigot DMCA affair). This is a real several-minute *compile*,
-  not a download — flagged plainly in the wizard's own copy.
+  This is a real several-minute *compile*, not a download — flagged
+  plainly in the wizard's own copy.
+  - **Two real bugs caught by actually reproducing a build locally
+    rather than trusting the design on paper** (the first version list
+    reused Mojang's manifest filtered to 1.8+, which looked reasonable
+    and was wrong): (1) not every Mojang release has matching Spigot
+    BuildData — confirmed live that `hub.spigotmc.org/versions/
+    1.8.9.json` 404s (1.8.9 was a client-only Mojang patch, server
+    byte-identical to 1.8.8's, so Spigot never built it) while
+    `1.8.8.json` exists. Fixed by scraping Spigot's own real (if
+    undocumented) directory listing at `hub.spigotmc.org/versions/` for
+    the version list instead of guessing from Mojang's — the actual
+    authoritative source, confirmed against ~4000 real entries.
+    (2) BuildTools refuses to compile old Minecraft versions on a
+    modern JDK at all — confirmed live, Java 25 building 1.8.8 fails
+    immediately with "requires Java versions between [Java 7, Java 8]."
+    CraftPanel deliberately doesn't auto-install Java 8 (`javainstall.rs`'s
+    own doc comment: substituting a newer JVM under genuinely old
+    software is its own can of worms), so this can't be silently
+    papered over — instead, BuildTools' own Java-range message is now
+    caught and surfaced as a specific, actionable error ("install a
+    matching JDK yourself, then point this server's Java path at it")
+    instead of a generic "check your JDK" hint that would've been
+    actively misleading (a real, working, modern JDK is exactly the
+    problem for a pre-~1.12 version).
 
 **Verified:** `cargo build --lib`, `cargo test --lib` 153 passed (0
 failed, 19 ignored — including new live/ignored tests confirming Spigot's

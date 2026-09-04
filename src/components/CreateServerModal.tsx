@@ -36,7 +36,7 @@ const LOADERS: Loader[] = ["paper", "vanilla", "spigot", "fabric", "neoforge", "
 const LOADER_PITCH: Record<Loader, string> = {
   paper: "Runs smoothly and takes plugins. The best pick if you're not sure.",
   vanilla: "Exactly what Mojang ships. No mods, no plugins, no surprises.",
-  spigot: "The original plugin server Paper is built on. CraftPanel compiles it for you — takes several minutes, not a download.",
+  spigot: "The original plugin server Paper is built on. CraftPanel compiles it for you — takes several minutes, not a download. Older versions (roughly pre-1.12) may need a separate old JDK installed on this machine.",
   fabric: "Light and quick to update — the usual choice for modpacks.",
   neoforge: "The actively developed Forge. Use it for newer modpacks.",
   forge: "The classic mod loader. Use it if your modpack says Forge.",

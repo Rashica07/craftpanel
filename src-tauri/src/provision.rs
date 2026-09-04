@@ -182,17 +182,49 @@ fn mc_version_key(id: &str) -> Vec<u32> {
         .collect()
 }
 
-/// There's no version-listing API for Spigot the way there is for Paper —
-/// BuildTools just takes `--rev <mc_version>` and attempts to build
-/// whatever you ask for. Reuses Mojang's own manifest (already correctly
-/// ordered) filtered to 1.8+, since that's the reboot point after the
-/// 2014 Bukkit/Spigot DMCA affair — everything before it is effectively
-/// unsupported by BuildTools today and would just fail the build.
+/// Real, hard-won fix — the original version of this reused Mojang's own
+/// manifest filtered to 1.8+, on the assumption every Mojang release has
+/// matching Spigot BuildData. It doesn't: verified live that
+/// `hub.spigotmc.org/versions/1.8.9.json` 404s (1.8.9 was a client-only
+/// patch — its server is byte-identical to 1.8.8's, so Spigot never
+/// published separate BuildData for it) while `1.8.8.json` exists. Any
+/// version picked from a Mojang-derived list could 404 deep into a
+/// multi-minute BuildTools run with a useless-looking stack trace.
+///
+/// `hub.spigotmc.org/versions/` turns out to serve a real (if
+/// undocumented) directory listing — scraping the `.json` filenames
+/// there is the actual authoritative "can BuildTools build this" list,
+/// confirmed against a live fetch: real MC versions carry a `.`
+/// (`1.21.9`, `26.2`, `1.13-pre7`), and are mixed in with ~4000 bare
+/// numeric entries (`1000`, `999`, `latest`, …) that are BuildTools'
+/// own internal build-config revisions, not Minecraft versions — a
+/// `.` in the id is what tells them apart.
 fn spigot_versions() -> Result<Vec<VersionInfo>, String> {
-    Ok(mojang_versions()?
-        .into_iter()
-        .filter(|v| v.kind == "release" && mc_version_key(&v.id) >= vec![1, 8])
-        .collect())
+    let body = ureq::get("https://hub.spigotmc.org/versions/")
+        .set("User-Agent", UA)
+        .timeout(Duration::from_secs(20))
+        .call()
+        .map_err(|e| format!("hub.spigotmc.org/versions/: {e}"))?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for chunk in body.split("href=\"").skip(1) {
+        let Some(end) = chunk.find(".json\"") else { continue };
+        let id = &chunk[..end];
+        if id.is_empty() || !id.contains('.') || id.contains('/') {
+            continue; // "../", and the ~4000 bare-number BuildTools revision files
+        }
+        out.push(VersionInfo {
+            id: id.to_string(),
+            kind: if id.contains('-') { "snapshot".into() } else { "release".into() },
+        });
+    }
+    if out.is_empty() {
+        return Err("hub.spigotmc.org/versions/ returned no usable versions".into());
+    }
+    out.sort_by(|a, b| mc_version_key(&b.id).cmp(&mc_version_key(&a.id)));
+    Ok(out)
 }
 
 fn fabric_game_versions() -> Result<Vec<VersionInfo>, String> {
@@ -656,20 +688,29 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
         }
         drop(tx);
 
+        // A single "last line seen" was close to useless for diagnosing a
+        // real failure — Java prints the actual exception message *above*
+        // its stack-trace frames, so the one line right before exit is
+        // typically just "at some.deeply.Nested.method(File.java:60)"
+        // with zero information in it. Keep a rolling tail instead, so
+        // whatever actually explains the failure (an "Exception in
+        // thread..." or "Caused by:" line) is still in view.
+        const TAIL_LINES: usize = 40;
+        let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(TAIL_LINES);
+
         let started = Instant::now();
-        let mut last_line = String::new();
         let mut last_report = Instant::now() - Duration::from_secs(10);
         loop {
             if started.elapsed() > BUILD_TIMEOUT {
                 let _ = child.kill();
                 return Err(format!(
-                    "BuildTools didn't finish within {} minutes — either a very slow connection or it's stuck. Last line seen: {last_line}",
-                    BUILD_TIMEOUT.as_secs() / 60
+                    "BuildTools didn't finish within {} minutes — either a very slow connection or it's stuck. Last output:\n{}",
+                    BUILD_TIMEOUT.as_secs() / 60,
+                    tail.iter().cloned().collect::<Vec<_>>().join("\n")
                 ));
             }
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(line) => {
-                    last_line = line;
                     if last_report.elapsed() >= Duration::from_secs(2) {
                         last_report = Instant::now();
                         progress(Progress {
@@ -678,11 +719,15 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
                                 "Compiling Spigot via BuildTools… {}m{}s elapsed — {}",
                                 started.elapsed().as_secs() / 60,
                                 started.elapsed().as_secs() % 60,
-                                last_line.chars().take(100).collect::<String>()
+                                line.chars().take(100).collect::<String>()
                             ),
                             pct: None,
                         });
                     }
+                    if tail.len() == TAIL_LINES {
+                        tail.pop_front();
+                    }
+                    tail.push_back(line);
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if let Ok(Some(_)) = child.try_wait() {
@@ -695,8 +740,35 @@ fn build_spigot(spec: &CreateSpec, dir: &Path, java: &str, progress: &ProgressFn
 
         let status = child.wait().map_err(|e| e.to_string())?;
         if !status.success() {
+            let full_tail = tail.iter().cloned().collect::<Vec<_>>().join("\n");
+
+            // BuildTools gates old Minecraft versions on the JDK that was
+            // actually current when they shipped — confirmed live: Java 25
+            // building 1.8.8 fails immediately with this exact line, before
+            // ever touching Mojang/Spigot source. CraftPanel deliberately
+            // doesn't auto-install Java 8 (see `javainstall.rs`'s own doc
+            // comment — substituting a newer JVM under genuinely old
+            // software is its own can of worms), so the real fix is
+            // "install that JDK yourself and point the Java path field at
+            // it," not anything CraftPanel can paper over automatically.
+            if let Some(gate) = tail.iter().find(|l| l.contains("requires Java versions between")) {
+                return Err(format!(
+                    "{}. Install a matching JDK yourself, then point this server's Java path at it (CraftPanel doesn't auto-install old JDKs — see Settings → Default Java, or set it in this wizard).\n\nFull output:\n{full_tail}",
+                    gate.trim_start_matches('*').trim()
+                ));
+            }
+            // The other real failure mode hit during testing: picking a
+            // Minecraft version Spigot never published BuildData for (e.g.
+            // 1.8.9 — a client-only patch, server-identical to 1.8.8).
+            if tail.iter().any(|l| l.contains("Could not get version") || l.contains("does it exist?")) {
+                return Err(format!(
+                    "Spigot has no build data for {} — it may be a client-only patch with no separate server (try the version just below it), or too new/old for BuildTools yet. Full output:\n{full_tail}",
+                    spec.mc_version
+                ));
+            }
+
             return Err(format!(
-                "BuildTools failed (make sure you have a full JDK, not just a JRE, and a working internet connection). Last line seen: {last_line}"
+                "BuildTools failed (make sure you have a full JDK, not just a JRE, and a working internet connection). Last output:\n{full_tail}"
             ));
         }
 
@@ -1272,13 +1344,20 @@ mod tests {
         }
     }
 
+    /// The real regression: 1.8.9 has no Spigot BuildData at all (it's a
+    /// client-only Mojang patch, byte-identical server to 1.8.8) — a
+    /// Mojang-manifest-derived list would happily offer it and then 404
+    /// forty minutes into a BuildTools run. This must come from Spigot's
+    /// own real listing, which simply never contains "1.8.9".
     #[test]
     #[ignore]
-    fn spigot_versions_are_releases_from_1_8_onward() {
+    fn spigot_versions_excludes_189_and_includes_recent_releases() {
         let v = list_versions(Loader::Spigot).unwrap();
-        assert!(v.iter().all(|x| x.kind == "release"));
-        assert!(v.iter().all(|x| mc_version_key(&x.id) >= vec![1, 8]));
-        assert!(v.iter().any(|x| x.id == "1.21.1" || x.id.starts_with("1.21")));
+        assert!(!v.iter().any(|x| x.id == "1.8.9"), "1.8.9 has no Spigot BuildData and must not be offered");
+        assert!(v.iter().any(|x| x.id == "1.8.8"));
+        assert!(v.iter().any(|x| x.id.starts_with("1.21") || x.id.starts_with("26.")));
+        // no leaked BuildTools internal build-revision numbers ("1000", "999", "latest", …)
+        assert!(v.iter().all(|x| x.id.contains('.')));
     }
 
     /// Full end-to-end: download + first-boot a real Paper server, enable RCON,
