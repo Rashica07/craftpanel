@@ -209,6 +209,36 @@ pub fn read(server_dir: &str, server_type: ServerType) -> ServerSettings {
     }
 }
 
+/// `server.properties` keys with a real, well-documented vanilla command
+/// equivalent — pushing the new value over RCON makes it take effect
+/// immediately, no restart needed (the "mini restart" Aternos-style
+/// experience). Deliberately small and conservative: plenty of other
+/// properties (`view-distance`, `spawn-protection`, `allow-flight`, `pvp`,
+/// `max-players`, …) *look* like they should be just as live, but vanilla
+/// only reads most of them at process startup or per-player-join — and
+/// silently claiming "applied live" for a change that actually didn't
+/// take effect until the next restart would be a real, misleading bug,
+/// worse than just asking for a restart in the first place. Only add to
+/// this list something confirmed against a real, documented vanilla
+/// command, not a guess.
+pub fn live_command_for(key: &str, value: &str) -> Option<String> {
+    match key {
+        // `/difficulty <peaceful|easy|normal|hard>` — vanilla writes this
+        // straight back into server.properties itself, matching exactly.
+        "difficulty" => Some(format!("difficulty {value}")),
+        // `/defaultgamemode <survival|creative|adventure|spectator>` —
+        // only affects players joining *after* this runs, same as the
+        // property itself; already-connected players are untouched
+        // either way, so this is a faithful live equivalent.
+        "gamemode" => Some(format!("defaultgamemode {value}")),
+        // `/whitelist on` / `/whitelist off` — the enforcement toggle
+        // only; the member list itself is a separate, already-live
+        // surface (admin.rs's whitelist add/remove).
+        "white-list" => Some(format!("whitelist {}", if value == "true" { "on" } else { "off" })),
+        _ => None,
+    }
+}
+
 /// Apply key→value changes, byte-preserving every untouched line.
 /// Returns the keys that actually changed.
 pub fn apply(server_dir: &str, changes: &[(String, String)]) -> Result<Vec<String>, String> {
@@ -247,6 +277,20 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("server.properties"), s).unwrap();
         d.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn live_command_covers_only_the_confirmed_safe_keys() {
+        assert_eq!(live_command_for("difficulty", "hard"), Some("difficulty hard".into()));
+        assert_eq!(live_command_for("gamemode", "creative"), Some("defaultgamemode creative".into()));
+        assert_eq!(live_command_for("white-list", "true"), Some("whitelist on".into()));
+        assert_eq!(live_command_for("white-list", "false"), Some("whitelist off".into()));
+        // deliberately NOT live — startup/join-time-only in vanilla, and
+        // getting this wrong (claiming "applied live" when it wasn't) is
+        // worse than just asking for a restart.
+        for key in ["pvp", "max-players", "view-distance", "spawn-protection", "motd", "online-mode"] {
+            assert_eq!(live_command_for(key, "true"), None, "{key} should not be treated as live-appliable");
+        }
     }
 
     #[test]

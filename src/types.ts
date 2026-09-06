@@ -359,6 +359,20 @@ export interface AppSettings {
   stayAwakeOnPower: boolean;
 }
 
+export type PremiumPlan = "monthly" | "yearly" | "lifetime";
+export type PremiumSubStatus = "active" | "canceled" | "past_due";
+
+export interface PremiumStatus {
+  key: string;
+  active: boolean;
+  plan: PremiumPlan | null;
+  status: PremiumSubStatus | null;
+  currentPeriodEnd: number | null;
+  lastChecked: number;
+  upsellDismissedForever: boolean;
+  upsellLastShown: number;
+}
+
 export interface UpdateCheck {
   current: string;
   latest: string | null;
@@ -487,6 +501,8 @@ export interface ServerSettings {
 export interface ApplyResult {
   changed: string[];
   restartRequired: boolean;
+  /** Changed keys pushed live over RCON — no restart needed for these. */
+  liveApplied: string[];
 }
 
 /** Java-edition only — Bedrock's resource packs are a folder next to the

@@ -12,6 +12,7 @@ import type {
   ModpackHit,
   ModpackInfo,
   ModpackSpec,
+  PremiumStatus,
   Backup,
   BackupsConfig,
   CrashReport,
@@ -512,6 +513,27 @@ export const api = {
   appSettingsSet(settings: AppSettings): Promise<void> {
     return invoke("app_settings_set", { settings });
   },
+
+  // Premium licensing (see /licensing at the repo root)
+  premiumStatusGet(): Promise<PremiumStatus> {
+    return invoke("premium_status_get");
+  },
+  premiumActivate(key: string): Promise<PremiumStatus> {
+    return invoke("premium_activate", { key });
+  },
+  premiumRefresh(): Promise<PremiumStatus> {
+    return invoke("premium_refresh");
+  },
+  premiumDeactivate(): Promise<void> {
+    return invoke("premium_deactivate");
+  },
+  premiumMaybeShowUpsell(): Promise<boolean> {
+    return invoke("premium_maybe_show_upsell");
+  },
+  premiumDismissUpsellForever(): Promise<void> {
+    return invoke("premium_dismiss_upsell_forever");
+  },
+
   checkUpdate(): Promise<UpdateCheck> {
     return invoke("check_update");
   },

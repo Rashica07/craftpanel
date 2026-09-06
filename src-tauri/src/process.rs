@@ -367,6 +367,7 @@ impl ProcessManager {
             "system",
             format!("Launched pid {pid}: {}", describe_command(&cmd)),
         );
+        shared.push(&self.sink, "system", crate::watermark::banner());
 
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();

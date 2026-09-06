@@ -1,0 +1,21 @@
+{
+  "name": "craftpanel-licensing",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Stripe checkout + webhook + license-key API for CraftPanel Premium, running as a Cloudflare Worker.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "stripe": "^17.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241224.0",
+    "typescript": "~5.8.3",
+    "wrangler": "^3.99.0"
+  }
+}

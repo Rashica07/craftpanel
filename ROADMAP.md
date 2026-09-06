@@ -1991,18 +1991,112 @@ Spigot's version list is real and correctly filtered, and that
 `find_compatible_java` locates a real installed JDK), `npx tsc --noEmit`,
 `npm run build` all clean at v2.9.0.
 
+## Batch 34 — marketing site, downloads page, and Premium licensing plumbing (v3.0.0, 2026-09-06)
+
+Major-version bump, not a routine patch — this is the release that
+introduces monetization (Premium licensing, however unfinished) as a
+concept in the app for the first time, alongside the console watermark.
+
+- **`craftpanel-site` overhaul.** What was one `index.html` is now four
+  pages (home, Premium/pricing, ToS, Privacy) sharing `assets/styles.css`
+  + `assets/nav.js`. Real favicon set (SVG + 32/180/192/512 PNGs) + web
+  manifest + robots.txt + sitemap.xml + OG/Twitter/JSON-LD tags. Tailwind
+  loaded via CDN for new-page utility classes, without ripping out the
+  existing bespoke design system (tokens/components already matched the
+  app — that stayed). Dropped all emoji in favor of line-icon SVGs, fixed
+  a real layout bug (empty trailing feature-grid cells at wide
+  viewports), and corrected stale copy (added Spigot, removed the old
+  cloud/R2 backup claim that v2.9.0 already removed from the app itself).
+- **`downloads.html` — a real, self-updating downloads page.** Fetches
+  `GET /repos/Rashica07/craftpanel/releases/latest` from the browser at
+  page load (10-minute `sessionStorage` cache to be polite to GitHub's
+  anonymous rate limit), matches assets to platforms by filename
+  (`aarch64.dmg`, `_x64.dmg`, `x64-setup.exe`, `x64_en-US.msi`), and
+  renders live version/size/release-notes — never needs a manual edit
+  when a new version ships. Falls back to a plain link to GitHub Releases
+  if the API call fails. Every other page's "Download" button and nav now
+  points here instead of straight to GitHub.
+- **Freemium pricing decided and published.** Free is the full app,
+  nothing gated (confirmed: local + LAN + public/UPnP hosting, console,
+  world/player management, Java+Bedrock, mods/plugins, backups, multiple
+  servers — matches what's actually built). Premium: €4.99/mo, €39.99/yr,
+  €79.99 lifetime, for automation/monitoring/management/backup/
+  customization tooling on top — Premium never unlocks hosting itself.
+  "CraftPanel Intelligence" (AI features) marked Roadmap on the page
+  since it's speculative, not planned.
+- **`licensing/` — a Cloudflare Worker for Stripe checkout + webhook +
+  license keys.** New top-level folder (`craftpanel-licensing`), same
+  TypeScript/npm convention as `bot/`. Embedded Stripe Checkout by
+  default (card entry + Link, inline in the site's own modal via Stripe's
+  iframe — no redirect away, no raw card data touching CraftPanel code;
+  classic hosted redirect kept as an opt-in fallback path). Webhook
+  issues a license key on `checkout.session.completed`, extends it on
+  `invoice.paid`, marks it `canceled`/`past_due` on cancellation or a
+  failed renewal. `GET /api/license/validate?key=...` is what the Tauri
+  app calls. Cloudflare KV only — no separate database. Typechecks clean,
+  bundles clean (`wrangler deploy --dry-run`), but **cannot go live
+  without the account owner's own Stripe account + API keys** — creating
+  accounts and handling secret keys isn't something done on their behalf;
+  exact remaining steps are in `licensing/README.md`.
+- **Premium licensing plumbing in the Tauri app itself** (`premium.rs`,
+  new Settings → Premium tab, upsell modal) — activation, status,
+  deactivation, and background re-validation against the licensing API,
+  plus the "rarely, not naggily" upsell popup: a pure, tested
+  `should_show_upsell(status, now, roll)` gates on both a minimum 4-day
+  gap since last shown *and* a 30% random roll each time that gap opens,
+  with a real "Don't show this again" that's permanent. Deliberately
+  does **not** gate any actual feature yet — Settings → Premium shows
+  activation/status only, since none of the Premium feature categories
+  (automation, monitoring, etc.) are built. Gating ships alongside each
+  feature as it's built, not as placeholder locks on things that don't
+  exist yet.
+- **A founder/dev lifetime key** (`FOUNDER_KEY_HASH` in `premium.rs`) —
+  activates Premium locally with zero network call, so the app's own
+  author has a working key before any Stripe/Cloudflare deployment
+  exists. Argon2-hashed (same KDF `lock.rs` uses for the app-lock PIN),
+  not a plaintext constant — this repo is public, and a bare string
+  match would hand every reader a free permanent key.
+- **A "made with CraftPanel" console watermark** (`watermark.rs`) — an
+  ansi_shadow-style block-letter banner, pushed as one `"system"`-stream
+  `LogLine` the instant a server starts, rendered in the app's own accent
+  color via the existing `system` level styling (no frontend changes
+  needed). Deliberately scoped to CraftPanel's own console view only —
+  requested as something that should also survive a server folder being
+  distributed and launched *without* CraftPanel, which would need a
+  compiled Paper/Spigot plugin (and separately, mods per other loader)
+  hooking the real boot sequence — real, ongoing per-loader engineering,
+  not a file to drop in alongside everything else this batch.
+
+**Not done this batch, on request but out of scope for one pass:**
+subtle in-app ads (raised, then explicitly dropped once the realistic
+options — no real "AdSense for desktop apps" exists — were on the
+table) and the Premium feature categories themselves (automation,
+monitoring, server management, better backups, customization) — the
+licensing plumbing above is the foundation each of those gates against
+once built.
+
+**Verified:** `cargo test --lib` 161 passed (0 failed, 22 ignored,
+including the upsell-timing tests, the founder-key verification test,
+and the watermark banner test), `cargo check` clean, `npx tsc --noEmit`
+clean, `wrangler deploy --dry-run` clean for the new Worker, and the live
+site pages hand-verified in-browser (including a real fetch against the
+actual GitHub Releases API returning v2.9.0's real assets). Cloudflare
+deployment itself is blocked on the account owner's API token missing
+Workers Scripts/KV Storage Edit permission — confirmed via two real
+failed calls, not assumed.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.
 - ✓ **One-click "disable the suspect mod" on the crash banner** — shipped,
   Batch 14.
-- **Marketing/landing site** — a real site for CraftPanel, styled after the
-  user's own kiqa-dev.it. Not app code; own repo/deploy target.
-- **Cookies / Privacy Policy / ToS pages** — needed once there's a landing
-  site or any account/subscription surface collecting data. Blocked on
-  deciding what data is actually collected (currently: none beyond the new
-  install-id marker above, which is anonymous and local-only; R2 cloud-sync
-  is opt-in and BYO-credentials).
-- **Subscription model** — mentioned as "idk", i.e. undecided. Needs a real
-  decision on what's paid (hosting? cloud sync? nothing, and it stays free?)
-  before it's actionable — this one blocks on a product decision, not code.
+- ✓ **Marketing/landing site** — shipped, `craftpanel-site` repo
+  (`CraftPanel Landing/`), live at rashica07.github.io/craftpanel-site.
+- ✓ **Cookies / Privacy Policy / ToS pages** — shipped as drafts (real
+  content, `[bracketed]` placeholders for the owner's own legal/contact
+  details still need filling in before they're final), Batch 34.
+- ✓ **Subscription model** — decided: freemium. Free is the full app,
+  Premium is extra tooling on top (never gates hosting itself). Pricing
+  and the Free/Premium feature split are locked in (Batch 34); actual
+  Premium *features* (automation, monitoring, etc.) are still unbuilt —
+  only the licensing plumbing shipped so far.

@@ -5,6 +5,7 @@ import type {
   BackupsConfig,
   DoctorReport,
   JavaInfo,
+  PremiumStatus,
   ProvisionProgress,
   RemoteApiStatus,
   UpdateCheck,
@@ -34,11 +35,12 @@ const DEFAULTS: AppSettings = {
   stayAwakeOnPower: false,
 };
 
-type Tab = "general" | "account" | "updates" | "java" | "backups" | "diagnostics" | "about";
+type Tab = "general" | "account" | "premium" | "updates" | "java" | "backups" | "diagnostics" | "about";
 
 const TABS: TabDef[] = [
   { id: "general", label: "General", icon: "sliders" },
   { id: "account", label: "Account", icon: "user" },
+  { id: "premium", label: "Premium", icon: "crown" },
   { id: "updates", label: "Updates", icon: "download" },
   { id: "java", label: "Java", icon: "cpu" },
   { id: "backups", label: "Backups", icon: "archive" },
@@ -138,6 +140,11 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
         {visited.has("account") && (
           <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "account" && "hidden")}>
             <AccountTab />
+          </div>
+        )}
+        {visited.has("premium") && (
+          <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "premium" && "hidden")}>
+            <PremiumTab />
           </div>
         )}
         {visited.has("updates") && (
@@ -617,6 +624,147 @@ function AccountTab() {
       <LockCard />
       <RemoteApiCard />
     </>
+  );
+}
+
+/* ─────────────────────────────── Premium ──────────────────────────────── */
+
+const PREMIUM_SITE_URL = "https://rashica07.github.io/craftpanel-site/premium.html";
+
+function premiumPlanLabel(plan: PremiumStatus["plan"]): string {
+  switch (plan) {
+    case "monthly":
+      return "Monthly";
+    case "yearly":
+      return "Yearly";
+    case "lifetime":
+      return "Lifetime";
+    default:
+      return "";
+  }
+}
+
+function PremiumTab() {
+  const [status, setStatus] = useState<PremiumStatus | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    api.premiumStatusGet().then(setStatus).catch(() => {});
+  };
+  useEffect(load, []);
+
+  async function activate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.premiumActivate(keyInput));
+      setKeyInput("");
+      toast.ok("Premium activated", "Thanks for supporting CraftPanel.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function recheck() {
+    setBusy(true);
+    try {
+      setStatus(await api.premiumRefresh());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deactivate() {
+    setBusy(true);
+    try {
+      await api.premiumDeactivate();
+      load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!status) {
+    return (
+      <Card title="Premium" icon="crown">
+        <div className="text-2xs text-ink-faint">Loading…</div>
+      </Card>
+    );
+  }
+
+  if (status.active) {
+    return (
+      <Card
+        title="Premium"
+        icon="crown"
+        description="Automation, monitoring, and management tools on top of the free app."
+        right={
+          <Badge tone="ok" dot>
+            Active
+          </Badge>
+        }
+      >
+        <div className="text-sm text-ink">
+          Plan: <span className="font-medium">{premiumPlanLabel(status.plan)}</span>
+        </div>
+        {status.currentPeriodEnd && (
+          <div className="mt-1 text-2xs text-ink-faint">
+            {status.status === "canceled" ? "Access ends" : "Renews"}{" "}
+            {new Date(status.currentPeriodEnd).toLocaleDateString()}
+          </div>
+        )}
+        <div className="mt-4 flex gap-2 border-t border-line-soft pt-4">
+          <Button variant="secondary" size="sm" onClick={recheck} disabled={busy}>
+            Re-check status
+          </Button>
+          <Button variant="ghost" size="sm" onClick={deactivate} disabled={busy}>
+            Remove key from this install
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      title="Premium"
+      icon="crown"
+      description="The free app has no locked features today — Premium adds extra tooling on top as it ships."
+    >
+      <Field label="License key">
+        <div className="flex gap-2">
+          <TextInput
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && activate()}
+            placeholder="CP-XXXX-XXXX-XXXX-XXXX"
+            className="flex-1"
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={activate}
+            disabled={busy || !keyInput.trim()}
+          >
+            {busy ? "Checking…" : "Activate"}
+          </Button>
+        </div>
+      </Field>
+      {error && <div className="mt-2 text-2xs text-bad">{error}</div>}
+      <a
+        href={PREMIUM_SITE_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-4 flex items-center justify-between rounded-lg border border-line-soft bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink transition-colors hover:border-accent-line"
+      >
+        See plans and pricing
+        <Icon name="external-link" size={13} className="text-ink-faint" />
+      </a>
+    </Card>
   );
 }
 

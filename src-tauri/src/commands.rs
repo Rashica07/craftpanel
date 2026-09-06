@@ -924,6 +924,13 @@ pub fn create_server_from_modpack(
 pub struct ApplyResult {
     pub changed: Vec<String>,
     pub restart_required: bool,
+    /// Changed keys that were also pushed live over RCON while the
+    /// server kept running — the Aternos-style "mini restart" for the
+    /// small, confirmed-safe set of properties that have a real vanilla
+    /// command equivalent (see `settings::live_command_for`). Empty
+    /// whenever the server wasn't running (nothing to push) or every
+    /// changed key needed a real restart.
+    pub live_applied: Vec<String>,
 }
 
 #[tauri::command]
@@ -936,14 +943,37 @@ pub fn get_settings(db: State<Db>, id: String) -> Result<ServerSettings, String>
 pub fn apply_settings(
     db: State<Db>,
     procs: State<ProcessManager>,
+    pool: State<RconPool>,
     id: String,
     changes: Vec<(String, String)>,
 ) -> Result<ApplyResult, String> {
     let rec = load(&db, &id)?;
     let changed = settings::apply(&rec.path, &changes)?;
-    let restart_required = !changed.is_empty()
-        && (procs.is_running(&id) || external::probe(&rec.path).looks_running());
-    Ok(ApplyResult { changed, restart_required })
+    let running = procs.is_running(&id) || external::probe(&rec.path).looks_running();
+
+    // Push whatever can be applied live immediately, over the same
+    // pooled RCON connection everything else uses — anything that
+    // doesn't have a live equivalent (or whose RCON push fails, e.g.
+    // RCON isn't even enabled) falls back to the honest "needs a
+    // restart" answer rather than silently doing nothing.
+    let mut live_applied = Vec::new();
+    let mut needs_restart = false;
+    if running {
+        for key in &changed {
+            let value = changes.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+            let applied = match (value, value.and_then(|v| settings::live_command_for(key, v))) {
+                (Some(_), Some(cmd)) => rcon_run(&pool, &rec, &cmd).is_ok(),
+                _ => false,
+            };
+            if applied {
+                live_applied.push(key.clone());
+            } else {
+                needs_restart = true;
+            }
+        }
+    }
+
+    Ok(ApplyResult { changed, restart_required: running && needs_restart, live_applied })
 }
 
 #[tauri::command]

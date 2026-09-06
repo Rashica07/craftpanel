@@ -4,6 +4,7 @@ import { AddServerModal } from "./components/AddServerModal";
 import { CreateServerModal } from "./components/CreateServerModal";
 import { TemplateModal } from "./components/TemplateModal";
 import { JoinSharedModal } from "./components/JoinSharedModal";
+import { PremiumUpsellModal } from "./components/PremiumUpsellModal";
 import { SettingsPage } from "./components/SettingsPage";
 import { LockScreen } from "./components/LockScreen";
 import { ServerDetail, type Tab as ServerTab } from "./components/ServerDetail";
@@ -361,6 +362,7 @@ export default function App() {
   const [showJoin, setShowJoin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showPremiumUpsell, setShowPremiumUpsell] = useState(false);
   const [requestedTab, setRequestedTab] = useState<ServerTab | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -394,6 +396,19 @@ export default function App() {
       .then(setLocked)
       .catch(() => setLocked(false));
   }, []);
+
+  // Silently re-confirm an activated key at launch (a subscription can
+  // lapse without the app being told), then — separately, and far more
+  // rarely — ask `premium_maybe_show_upsell` whether today's the day to
+  // show the upgrade nudge. Both are no-ops once Premium is active.
+  useEffect(() => {
+    if (locked !== false) return;
+    api.premiumRefresh().catch(() => {});
+    api
+      .premiumMaybeShowUpsell()
+      .then((show) => show && setShowPremiumUpsell(true))
+      .catch(() => {});
+  }, [locked]);
 
   // Sidebar player counts. Only polls servers that are actually up, slowly —
   // it's a nice-to-have, not worth hammering RCON for.
@@ -707,6 +722,9 @@ export default function App() {
           }
         }}
       />
+      {showPremiumUpsell && (
+        <PremiumUpsellModal onClose={() => setShowPremiumUpsell(false)} />
+      )}
       <Toaster />
     </div>
   );

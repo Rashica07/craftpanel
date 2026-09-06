@@ -27,6 +27,7 @@ mod net;
 mod perf;
 mod pluginconfig;
 mod power;
+mod premium;
 mod process;
 mod properties;
 mod provision;
@@ -41,6 +42,7 @@ mod snapshots;
 mod system;
 mod tunnel;
 mod updater;
+mod watermark;
 mod worlds;
 
 use tauri::{
@@ -320,6 +322,12 @@ pub fn run() {
             commands::mgmt_disable,
             commands::app_settings_get,
             commands::app_settings_set,
+            premium::premium_status_get,
+            premium::premium_activate,
+            premium::premium_refresh,
+            premium::premium_deactivate,
+            premium::premium_maybe_show_upsell,
+            premium::premium_dismiss_upsell_forever,
             commands::check_update,
             commands::install_update,
             commands::app_install_id,

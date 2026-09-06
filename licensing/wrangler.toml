@@ -1,0 +1,26 @@
+name = "craftpanel-licensing"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# `wrangler kv namespace create LICENSES` prints the real id — paste it
+# below before the first deploy. Two environments so test-mode Stripe
+# keys never share storage with live-mode ones.
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "a153cd5bb8464cb7913853e64f8189a1"
+
+[vars]
+# Non-secret. Restricts which origins the browser-facing endpoints
+# accept CORS requests from — the GitHub Pages site and local dev.
+ALLOWED_ORIGINS = "https://rashica07.github.io,http://localhost:8935"
+
+# Price IDs from the Stripe Dashboard (Product catalog → Prices). Not
+# secret — just IDs — so they live here rather than as `wrangler secret`.
+STRIPE_PRICE_MONTHLY = "REPLACE_WITH_price_..."
+STRIPE_PRICE_YEARLY = "REPLACE_WITH_price_..."
+STRIPE_PRICE_LIFETIME = "REPLACE_WITH_price_..."
+
+# Actual secrets (never go in this file — set with `wrangler secret put <NAME>`):
+#   STRIPE_SECRET_KEY       sk_test_... or sk_live_...
+#   STRIPE_WEBHOOK_SECRET   whsec_... from the Stripe Dashboard webhook config

@@ -240,9 +240,12 @@ export function SettingsPanel({
         server.id,
         Object.entries(draft) as [string, string][],
       );
+      const allLive = r.changed.length > 0 && !r.restartRequired && r.liveApplied.length === r.changed.length;
       toast.ok(
         r.changed.length
-          ? `Saved ${r.changed.length} change${r.changed.length > 1 ? "s" : ""}`
+          ? allLive
+            ? `Applied live — no restart needed`
+            : `Saved ${r.changed.length} change${r.changed.length > 1 ? "s" : ""}`
           : "Nothing to save",
         r.changed.join(", ") || undefined,
       );

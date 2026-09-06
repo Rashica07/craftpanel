@@ -646,6 +646,44 @@ mod tests {
         );
     }
 
+    // Scratch reproduction for a user report ("can't get OneBlock/Skyblock
+    // working on Spigot or Paper on 1.8/1.21/26.2") — no existing test
+    // exercises `install()` for Paper/Spigot at all, only `search()`
+    // (`live_search_paper_finds_real_plugins`) and `install()` for
+    // Fabric (`live_install_with_deps`). Real gap in coverage exactly
+    // where the report points.
+    #[test]
+    #[ignore]
+    fn live_install_oneblock_spigot_and_paper_across_versions() {
+        for (server_type, mc_version) in [
+            (ServerType::Spigot, "1.8.8"),
+            (ServerType::Paper, "1.21.1"),
+            (ServerType::Paper, "26.2"),
+        ] {
+            let d = std::env::temp_dir().join(format!("cp-mr-oneblock-{:?}-{}", server_type, mc_version));
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(&d).unwrap();
+            let r = install(&d.to_string_lossy(), server_type, "oneblock_bukkit", "mod", Some(mc_version));
+            println!("{server_type:?} {mc_version}: {r:?}");
+            let jars: Vec<_> = fs::read_dir(d.join("plugins")).map(|it| it.flatten().collect()).unwrap_or_default();
+            println!("  plugins/ contains: {:?}", jars.iter().map(|e| e.file_name()).collect::<Vec<_>>());
+            let _ = fs::remove_dir_all(&d);
+        }
+    }
+
+    /// Regression for the Quick Start "Skyblock" template swap — Iridium
+    /// Skyblock (used previously) only goes back to 1.13, leaving every
+    /// pre-1.13 server with nothing installable; OneBlock's real coverage
+    /// is confirmed broad (1.8 through the current year-scheme releases).
+    #[test]
+    #[ignore]
+    fn live_oneblock_supports_paper_across_the_full_version_range() {
+        let v = supported_versions("oneblock_bukkit", "paper").unwrap();
+        assert!(v.iter().any(|x| x == "1.8"), "should cover the classic 1.8 era");
+        assert!(v.iter().any(|x| x.starts_with("1.21")), "should cover current 1.21.x");
+        assert!(v.iter().any(|x| x.starts_with("26.")), "should cover the year-scheme releases");
+    }
+
     #[test]
     #[ignore]
     fn live_install_with_deps() {

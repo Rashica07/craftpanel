@@ -8,9 +8,12 @@ import { Icon } from "./Icon";
 import { RamSlider } from "./RamSlider";
 
 /** Real, verified Modrinth plugin slugs — checked live against the API
- * before pinning (downloads/last-updated as of writing): `iridiumskyblock`
- * (17k dl), `bedwars1058` (39k dl, the de-facto standard Bedwars plugin),
- * `essentialsx` (765k dl). Not guessed. */
+ * before pinning (downloads/last-updated as of writing): `oneblock_bukkit`
+ * (real, broad version coverage confirmed 1.8 through 26.2 — Iridium
+ * Skyblock, used here previously, only goes back to 1.13 and left every
+ * pre-1.13 server with nothing installable), `bedwars1058` (39k dl, the
+ * de-facto standard Bedwars plugin), `essentialsx` (765k dl). Not
+ * guessed. */
 interface Template {
   id: string;
   label: string;
@@ -31,8 +34,8 @@ const TEMPLATES: Template[] = [
     id: "skyblock",
     label: "Skyblock",
     icon: "package",
-    blurb: "Start on a floating island with nothing. Auto-installs Iridium Skyblock.",
-    plugin: { slug: "iridiumskyblock", name: "Iridium Skyblock" },
+    blurb: "Start on one block that regenerates as you break it. Auto-installs OneBlock — works from 1.8 all the way to the newest version.",
+    plugin: { slug: "oneblock_bukkit", name: "OneBlock" },
   },
   {
     id: "bedwars",
@@ -104,7 +107,11 @@ export function TemplateModal({
         // that's the real bug that made Skyblock fail every time Iridium
         // Skyblock hadn't published a build for whatever was newest yet.
         setStage(`Checking ${template.plugin.name} compatibility…`);
-        const supported = new Set(await api.modrinthSupportedVersions(template.plugin.slug, "spigot"));
+        // Checked against "paper" — the actual loader this template
+        // creates (below) — not "spigot": most Paper/Spigot plugins tag
+        // both, but checking the loader we're not even installing was
+        // never quite right.
+        const supported = new Set(await api.modrinthSupportedVersions(template.plugin.slug, "paper"));
         const match = versions.find((v) => supported.has(v.id));
         if (!match) {
           throw new Error(

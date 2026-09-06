@@ -167,9 +167,12 @@ export function AdminPanel({
     setBusy(true);
     setError(null);
     try {
+      // `apply_settings` itself now pushes "white-list" live over RCON
+      // when the server's running (see settings::live_command_for) — no
+      // separate manual `rconCommand` push needed here anymore, and
+      // restartRequired correctly comes back false for this key.
       const r = await api.applySettings(serverId, [["white-list", on ? "true" : "false"]]);
       if (r.restartRequired) onNeedsRestart?.();
-      if (reachable) await api.rconCommand(serverId, on ? "whitelist on" : "whitelist off").catch(() => {});
       setTimeout(load, 300);
     } catch (e) {
       setError(String(e));
