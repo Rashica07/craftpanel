@@ -10,6 +10,7 @@ import { LockScreen } from "./components/LockScreen";
 import { ServerDetail, type Tab as ServerTab } from "./components/ServerDetail";
 import { Dashboard } from "./components/Dashboard";
 import { CommandPalette } from "./components/CommandPalette";
+import { applyTheme } from "./theme";
 import {
   SERVER_TYPE_META,
   STATUS_META,
@@ -397,6 +398,13 @@ export default function App() {
       .catch(() => setLocked(false));
   }, []);
 
+  // Applies even before unlock, same as main.tsx's hardcoded "dark" default
+  // it's overriding — a Premium theme choice should hold on the lock
+  // screen too, not just past it.
+  useEffect(() => {
+    api.appSettingsGet().then((s) => applyTheme(s.theme)).catch(() => {});
+  }, []);
+
   // Silently re-confirm an activated key at launch (a subscription can
   // lapse without the app being told), then — separately, and far more
   // rarely — ask `premium_maybe_show_upsell` whether today's the day to
@@ -409,6 +417,19 @@ export default function App() {
       .then((show) => show && setShowPremiumUpsell(true))
       .catch(() => {});
   }, [locked]);
+
+  // Premium performance alerts (see src-tauri/src/alerts.rs) — a dedicated
+  // event, not the per-server "server:log" stream, specifically so it
+  // reaches you regardless of which server or tab is in front. Global,
+  // not gated on `locked` here — the backend already only emits this for
+  // an active Premium install, so there's nothing to double-gate.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    api.onPremiumAlert((alert) => {
+      toast.bad(alert.serverName, alert.message);
+    }).then((f) => (un = f));
+    return () => un?.();
+  }, []);
 
   // Sidebar player counts. Only polls servers that are actually up, slowly —
   // it's a nice-to-have, not worth hammering RCON for.

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { STATUS_TONE } from "../App";
+import { usePremium } from "../PremiumContext";
 import type { ProcSnapshot, ServerRecord, SystemInfo } from "../types";
-import { Badge, Button, StatusDot } from "./ui";
+import { Badge, Button, StatusDot, toast } from "./ui";
 import { Icon } from "./Icon";
+
+type BulkAction = "start" | "stop" | "backup";
 
 /** The landing view once you've got servers — an at-a-glance "does
  * anything need me right now" before drilling into any one server, plus
@@ -21,12 +24,50 @@ export function Dashboard({
   onStart: (id: string) => void;
   onStop: (id: string) => void;
 }) {
+  const { active: premiumActive } = usePremium();
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<BulkAction | null>(null);
 
   useEffect(() => {
     api.systemInfo().then(setSys).catch(() => {});
   }, []);
+
+  function toggleSelect(id: string) {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Bypasses the onStart/onStop props (typed to return void, since the
+  // per-row toggle button never needed to await them) and calls the API
+  // directly instead — a bulk action needs to know per-server success or
+  // failure to report one honest summary, not fire-and-forget N times.
+  async function runBulk(action: BulkAction) {
+    const ids = [...selected];
+    setBulkBusy(action);
+    const results = await Promise.allSettled(
+      ids.map((id) => {
+        if (action === "start") return api.startServer(id);
+        if (action === "stop") return api.stopServer(id);
+        return api.backupNow(id, "bulk");
+      }),
+    );
+    setBulkBusy(null);
+    const failed = results.filter((r) => r.status === "rejected").length;
+    const ok = results.length - failed;
+    const verb = action === "backup" ? "backed up" : `${action}ed`;
+    if (failed === 0) {
+      toast.ok(`${ok} server${ok === 1 ? "" : "s"} ${verb}`);
+      if (action !== "backup") setSelected(new Set());
+    } else {
+      toast.bad(`${ok} ${verb}, ${failed} failed`, "Open each server to see why.");
+    }
+  }
 
   const running = servers.filter((s) => runtimes[s.id]?.status === "running");
   const needsAttention = servers.filter((s) =>
@@ -94,6 +135,28 @@ export function Dashboard({
           </div>
         </div>
 
+        {premiumActive && selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-accent-line bg-accent-muted px-4 py-2.5">
+            <Badge tone="accent" icon="crown" size="sm">
+              Premium
+            </Badge>
+            <span className="text-sm text-ink">{selected.size} selected</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="secondary" loading={bulkBusy === "start"} onClick={() => runBulk("start")}>
+              Start
+            </Button>
+            <Button size="sm" variant="secondary" loading={bulkBusy === "stop"} onClick={() => runBulk("stop")}>
+              Stop
+            </Button>
+            <Button size="sm" variant="secondary" loading={bulkBusy === "backup"} onClick={() => runBulk("backup")}>
+              Back up
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+          </div>
+        )}
+
         <div className="space-y-2">
           {servers.map((s) => {
             const status = runtimes[s.id]?.status ?? "stopped";
@@ -104,6 +167,16 @@ export function Dashboard({
                 onClick={() => onOpen(s.id)}
                 className="flex w-full items-center gap-3 rounded-xl border border-line-soft bg-surface px-4 py-3 text-left transition-colors hover:border-line"
               >
+                {premiumActive && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggleSelect(s.id)}
+                    className="accent-accent"
+                    aria-label={`Select ${s.name} for a bulk action`}
+                  />
+                )}
                 <StatusDot tone={tone} live={tone === "ok"} size={9} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-ink">{s.name}</div>

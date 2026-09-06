@@ -748,8 +748,14 @@ pub fn change_server_version(
     let loader = parse_loader(&loader)?;
 
     let dir = std::path::Path::new(&rec.path);
-    backups::backup_now(dir, Some("before version/loader change"), "manual", &|_| {})
+    let safety_backup = backups::backup_now(dir, Some("before version/loader change"), "manual", &|_| {})
         .map_err(|e| format!("Backup failed, stopping before touching anything: {e}"))?;
+    // Premium: verify the one backup this whole operation's safety net
+    // depends on actually reads back cleanly *before* touching the jar —
+    // a corrupt safety backup here is as good as no safety net at all.
+    if crate::premium::is_active(&db) && !backups::verify_and_record(dir, &safety_backup.id).unwrap_or(true) {
+        return Err("The safety backup taken just now failed verification — stopping before touching anything.".into());
+    }
 
     let app2 = app.clone();
     let created = provision::change_version(&rec, loader, mc_version, loader_version, &move |p| {
@@ -1041,8 +1047,16 @@ pub fn backup_now(
     let sid = id.clone();
     let app2 = app.clone();
     let progress = move |msg: &str| emit_backup_progress(&app2, &sid, msg);
-    let made = backups::backup_now(dir, label.as_deref(), "manual", &progress)?;
-    backups::prune(dir, backups_keep(&db) as usize);
+    let mut made = backups::backup_now(dir, label.as_deref(), "manual", &progress)?;
+    if crate::premium::is_active(&db) {
+        if let Ok(ok) = backups::verify_and_record(dir, &made.id) {
+            made.verified = Some(ok);
+            if !ok {
+                emit_backup_progress(&app, &id, "warning: this backup failed verification");
+            }
+        }
+    }
+    prune_backups(dir, &db);
     Ok(made)
 }
 
@@ -1081,11 +1095,35 @@ pub fn restore_backup(
 #[serde(rename_all = "camelCase")]
 pub struct BackupsConfig {
     pub keep: u32,
+    /// Premium. When set, this — not `keep` — governs pruning: everything
+    /// from the last `recentHours` is kept, older ones thin to one per
+    /// day for `dailyDays`. Persists even if Premium lapses (so re-
+    /// activating doesn't lose the setting), but only takes effect while
+    /// active — see the premium check at each `prune`/`prune_tiered` call
+    /// site.
+    pub tiered: Option<TieredRetention>,
+}
+
+#[derive(Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TieredRetention {
+    pub recent_hours: u32,
+    pub daily_days: u32,
+}
+
+const BACKUPS_TIERED_KEY: &str = "backups.tiered";
+
+fn backups_tiered(db: &State<Db>) -> Option<TieredRetention> {
+    db.get_setting(BACKUPS_TIERED_KEY)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str(&s).ok())
 }
 
 #[tauri::command]
 pub fn get_backups_config(db: State<Db>) -> BackupsConfig {
-    BackupsConfig { keep: backups_keep(&db) }
+    BackupsConfig { keep: backups_keep(&db), tiered: backups_tiered(&db) }
 }
 
 #[tauri::command]
@@ -1094,10 +1132,33 @@ pub fn set_backups_keep(db: State<Db>, keep: u32) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn set_backups_tiered(db: State<Db>, tiered: Option<TieredRetention>) -> Result<(), String> {
+    let raw = match &tiered {
+        Some(t) => serde_json::to_string(t).map_err(|e| e.to_string())?,
+        None => String::new(),
+    };
+    db.set_setting(BACKUPS_TIERED_KEY, &raw).map_err(|e| e.to_string())
+}
+
+/// One decision, shared by every place a backup gets pruned (this file's
+/// own `backup_now` and `schedule.rs`'s scheduled path) — Premium and a
+/// tiered config both present means tiered retention runs instead of the
+/// plain "keep newest N", not on top of it.
+pub(crate) fn prune_backups(dir: &std::path::Path, db: &State<Db>) {
+    match (crate::premium::is_active(db), backups_tiered(db)) {
+        (true, Some(t)) => backups::prune_tiered(dir, t.recent_hours, t.daily_days),
+        _ => backups::prune(dir, backups_keep(db) as usize),
+    }
+}
+
 // --- "Time Machine" snapshots ------------------------------------------------
 
 #[tauri::command]
 pub fn snapshot_now(db: State<Db>, id: String) -> Result<Snapshot, String> {
+    if !crate::premium::is_active(&db) {
+        return Err("Time Machine snapshots are a Premium feature — see Settings → Premium.".into());
+    }
     let rec = load(&db, &id)?;
     let dir = std::path::Path::new(&rec.path);
     let made = snapshots::snapshot_now(dir, "manual", &|_| {})?;
@@ -1816,6 +1877,16 @@ pub struct AppSettings {
     /// actually fire instead of sitting there asleep at the target time.
     #[serde(default)]
     pub stay_awake_on_power: bool,
+    /// "dark" (default), "light", "midnight", "sunset" — see index.css.
+    /// Empty string (the zero value) means "dark" too; the frontend treats
+    /// them the same rather than this needing a non-empty default here.
+    /// Premium-only in the UI (Settings hides the picker without an active
+    /// key) but not enforced here — there's no adversarial stake in a
+    /// single-player desktop app's own cosmetic preference, so this stays
+    /// as simple as `expert_mode` above rather than growing a server-side
+    /// check to match.
+    #[serde(default)]
+    pub theme: String,
 }
 
 const APP_SETTINGS_KEY: &str = "app.settings";

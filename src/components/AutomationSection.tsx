@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { usePremium } from "../PremiumContext";
 import type { Schedule } from "../types";
-import { Button, Card } from "./ui";
+import { Badge, Button, Card } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
 
 const EMPTY: Schedule = {
@@ -19,6 +20,7 @@ const EMPTY: Schedule = {
 };
 
 export function AutomationSection({ serverId }: { serverId: string }) {
+  const { active: premiumActive } = usePremium();
   const [sch, setSch] = useState<Schedule>(EMPTY);
   const [saved, setSaved] = useState<Schedule>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -168,8 +170,12 @@ export function AutomationSection({ serverId }: { serverId: string }) {
         <span className="text-2xs text-ink-faint">hours, while running</span>
       </label>
 
+      {premiumActive && (
       <div className="mt-3 border-t border-line-soft pt-3">
         <label className="flex items-center gap-2 text-sm">
+          <Badge tone="accent" icon="crown" size="sm" className="mr-1">
+            Premium
+          </Badge>
           <input
             type="checkbox"
             checked={sch.snapshotIntervalMins != null}
@@ -225,6 +231,7 @@ export function AutomationSection({ serverId }: { serverId: string }) {
           </div>
         )}
       </div>
+      )}
 
       <div className="mt-3 border-t border-line pt-2">
         <div className="mb-1 text-2xs uppercase tracking-wide text-ink-faint">

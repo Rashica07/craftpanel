@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { Backup } from "../types";
+import { usePremium } from "../PremiumContext";
+import type { Backup, TieredRetention } from "../types";
 import {
   Badge,
   Button,
@@ -45,8 +46,10 @@ export function BackupsPanel({
   serverId: string;
   locked: boolean;
 }) {
+  const { active: premiumActive } = usePremium();
   const [backups, setBackups] = useState<Backup[] | null>(null);
   const [keep, setKeep] = useState<number>(20);
+  const [tiered, setTiered] = useState<TieredRetention | null>(null);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -57,7 +60,10 @@ export function BackupsPanel({
 
   const load = useCallback(() => {
     api.listBackups(serverId).then(setBackups).catch((e) => setError(String(e)));
-    api.getBackupsConfig().then((c) => setKeep(c.keep)).catch(() => {});
+    api.getBackupsConfig().then((c) => {
+      setKeep(c.keep);
+      setTiered(c.tiered);
+    }).catch(() => {});
   }, [serverId]);
 
   useEffect(() => {
@@ -100,6 +106,11 @@ export function BackupsPanel({
     const v = Math.max(0, Math.min(1000, Math.floor(n) || 0));
     setKeep(v);
     api.setBackupsKeep(v).catch((e) => setError(String(e)));
+  }
+
+  function saveTiered(next: TieredRetention | null) {
+    setTiered(next);
+    api.setBackupsTiered(next).catch((e) => setError(String(e)));
   }
 
   return (
@@ -161,21 +172,78 @@ export function BackupsPanel({
         icon="clock"
         description="Kept in craftpanel-backups/ next to the server."
         right={
-          <Tooltip label="Older backups past this count are deleted automatically. Pre-restore safety copies are always kept.">
+          <Tooltip
+            label={
+              tiered
+                ? "Not in effect — smart retention below is governing pruning instead."
+                : "Older backups past this count are deleted automatically. Pre-restore safety copies are always kept."
+            }
+          >
             <label className="flex items-center gap-1.5 text-2xs text-ink-faint">
               Keep newest
               <TextInput
                 type="number"
                 min={0}
+                disabled={!!tiered}
                 value={keep}
                 onChange={(e) => saveKeep(Number(e.target.value))}
-                className="w-16 text-center tabular-nums"
+                className="w-16 text-center tabular-nums disabled:opacity-40"
               />
             </label>
           </Tooltip>
         }
         pad={false}
       >
+        {premiumActive && (
+          <div className="border-b border-line-soft px-3.5 py-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Badge tone="accent" icon="crown" size="sm" className="mr-1">
+                Premium
+              </Badge>
+              <input
+                type="checkbox"
+                checked={!!tiered}
+                onChange={(e) =>
+                  saveTiered(e.target.checked ? { recentHours: 24, dailyDays: 30 } : null)
+                }
+                className="accent-accent"
+              />
+              <span className="flex-1">Smart retention — keep recent, thin older to 1/day</span>
+            </label>
+            {tiered && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 text-2xs text-ink-faint">
+                <span className="flex items-center gap-1.5">
+                  Keep everything from the last
+                  <input
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={tiered.recentHours}
+                    onChange={(e) =>
+                      saveTiered({ ...tiered, recentHours: Math.max(1, Number(e.target.value) || 24) })
+                    }
+                    className="w-14 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink"
+                  />
+                  hours
+                </span>
+                <span className="flex items-center gap-1.5">
+                  then 1/day for
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={tiered.dailyDays}
+                    onChange={(e) =>
+                      saveTiered({ ...tiered, dailyDays: Math.max(1, Number(e.target.value) || 30) })
+                    }
+                    className="w-14 rounded border border-line bg-surface-2 px-1 py-0.5 text-center text-ink"
+                  />
+                  days
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         {!backups ? (
           <SkeletonList rows={4} />
         ) : backups.length === 0 ? (
@@ -204,6 +272,19 @@ export function BackupsPanel({
                       <span className="tabular-nums">{size(b.sizeBytes)}</span>
                     </div>
                   </div>
+                  {b.verified !== null && (
+                    <Tooltip
+                      label={
+                        b.verified
+                          ? "Every file re-read after saving — the zip isn't corrupt."
+                          : "This one failed verification — the zip may be unreadable. Take a fresh backup."
+                      }
+                    >
+                      <Badge tone={b.verified ? "ok" : "bad"} icon={b.verified ? "check-circle" : "alert-octagon"} size="sm">
+                        {b.verified ? "Verified" : "Failed check"}
+                      </Badge>
+                    </Tooltip>
+                  )}
                   <Badge tone={TRIGGER_META[b.trigger].tone}>
                     {TRIGGER_META[b.trigger].label}
                   </Badge>

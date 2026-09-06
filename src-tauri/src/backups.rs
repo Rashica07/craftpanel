@@ -30,6 +30,13 @@ pub struct Backup {
     pub label: Option<String>,
     /// "manual" | "pre-restore" | "scheduled"
     pub trigger: String,
+    /// Premium. `None` = never checked (free tier, or an older backup from
+    /// before this existed) — not the same as `Some(false)`, a real failed
+    /// check. Set by [`verify_and_record`], called by whichever command
+    /// layer already knows whether Premium is active; `backup_now` itself
+    /// doesn't reach for a `Db` just to decide this.
+    #[serde(default)]
+    pub verified: Option<bool>,
 }
 
 fn now() -> i64 {
@@ -131,6 +138,7 @@ pub fn backup_now(
         size_bytes: buf.len() as u64,
         label: label.map(str::to_string).filter(|s| !s.trim().is_empty()),
         trigger: trigger.to_string(),
+        verified: None,
     };
     write_sidecar(&root, &meta)?;
     progress("Done.");
@@ -162,6 +170,48 @@ pub(crate) fn collect_files(dir: &Path) -> Vec<(PathBuf, String)> {
 fn write_sidecar(root: &Path, meta: &Backup) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(meta).map_err(|e| e.to_string())?;
     fs::write(root.join(format!("{}.json", meta.id)), json).map_err(|e| e.to_string())
+}
+
+// --- verification (Premium) --------------------------------------------------
+
+/// Re-reads every entry in a zip, which is what actually exercises the
+/// `zip` crate's own CRC32 check — it verifies as data streams through a
+/// `read`, not at open time, so a zip that merely *opens* fine can still
+/// be silently corrupt (a truncated write, a bad sector) until something
+/// reads all the way through it. This is that read, done on purpose right
+/// after the backup is made rather than leaving corruption to be
+/// discovered only when someone actually needs the backup to work.
+pub fn verify(zip_path: &Path) -> Result<(), String> {
+    let data = fs::read(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(data)).map_err(|e| format!("not a valid zip: {e}"))?;
+    let mut buf = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+        buf.clear();
+        entry.read_to_end(&mut buf).map_err(|e| format!("{name}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Runs [`verify`] against an existing backup and rewrites its sidecar with
+/// the result. Called by the command layer right after `backup_now`
+/// returns, only when Premium is active — kept as a separate step instead
+/// of a parameter on `backup_now` itself so that function (and `restore`,
+/// which calls it internally for its own pre-restore safety copy) never
+/// needs a `Db` handle just to decide whether to verify.
+pub fn verify_and_record(dir: &Path, id: &str) -> Result<bool, String> {
+    let id = sanitize_id(id)?;
+    let root = backup_root(dir);
+    let zip_path = root.join(format!("{id}.zip"));
+    let ok = verify(&zip_path).is_ok();
+
+    let sidecar = root.join(format!("{id}.json"));
+    let raw = fs::read(&sidecar).map_err(|e| e.to_string())?;
+    let mut meta: Backup = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+    meta.verified = Some(ok);
+    write_sidecar(&root, &meta)?;
+    Ok(ok)
 }
 
 // --- list / delete ----------------------------------------------------------
@@ -222,6 +272,29 @@ pub fn prune(dir: &Path, keep: usize) {
         .collect();
     for old in prunable.into_iter().skip(keep) {
         let _ = delete(dir, &old.id);
+    }
+}
+
+/// Premium alternative to [`prune`]: instead of a flat "keep newest N",
+/// keep everything from the last `recent_hours` and thin older ones to one
+/// per day for `daily_days` — the same policy Time Machine snapshots use
+/// (see `retention.rs`). `pre-restore` backups are left alone here too,
+/// same as `prune`.
+pub fn prune_tiered(dir: &Path, recent_hours: u32, daily_days: u32) {
+    let prunable: Vec<Backup> = list(dir).into_iter().filter(|b| b.trigger != "pre-restore").collect();
+    if prunable.is_empty() {
+        return;
+    }
+    let keep_ids = crate::retention::tiered_keep_ids(
+        now(),
+        prunable.iter().map(|b| (b.id.as_str(), b.created_at)),
+        recent_hours,
+        daily_days,
+    );
+    for b in &prunable {
+        if !keep_ids.contains(&b.id) {
+            let _ = delete(dir, &b.id);
+        }
     }
 }
 
@@ -294,6 +367,7 @@ pub(crate) fn sanitize_id(id: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn server(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("cp-bak-{tag}-{:?}", std::thread::current().id()));
@@ -332,6 +406,31 @@ mod tests {
         assert!(names.iter().any(|n| n == "mods/cool.jar"));
         assert!(!names.iter().any(|n| n.starts_with("logs/")));
         assert!(!names.iter().any(|n| n.starts_with(BACKUP_DIR)));
+    }
+
+    #[test]
+    fn verify_passes_a_real_backup_and_catches_a_corrupted_one() {
+        let d = server("verify");
+        let b = backup_now(&d, None, "manual", &noop).unwrap();
+        let zip_path = d.join(BACKUP_DIR).join(format!("{}.zip", b.id));
+
+        assert!(verify(&zip_path).is_ok(), "a freshly written zip should verify clean");
+        assert!(verify_and_record(&d, &b.id).unwrap());
+        assert_eq!(list(&d)[0].verified, Some(true));
+
+        // Truncate the tail off the archive — destroys the end-of-central-
+        // directory record every valid zip ends with, a simple and
+        // deterministic way to corrupt one on purpose (flipping bytes at a
+        // computed offset risks landing on the central directory instead
+        // of entry data depending on how small the test files pack down,
+        // which would test a different failure than intended).
+        let mut bytes = fs::read(&zip_path).unwrap();
+        bytes.truncate(bytes.len().saturating_sub(8));
+        fs::write(&zip_path, &bytes).unwrap();
+
+        assert!(verify(&zip_path).is_err(), "a truncated zip should fail verification");
+        assert!(!verify_and_record(&d, &b.id).unwrap());
+        assert_eq!(list(&d)[0].verified, Some(false));
     }
 
     #[test]
@@ -440,6 +539,53 @@ mod tests {
         let manual_left = left.iter().filter(|b| b.trigger == "manual").count();
         assert_eq!(manual_left, 2);
         assert!(left.iter().any(|b| b.id == pr.id), "pre-restore must be kept");
+
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn prune_tiered_keeps_recent_thins_older_and_spares_pre_restore() {
+        let d = server("prune-tiered");
+        let root = backup_root(&d);
+        let real_now = now();
+
+        // 2 backups today — both inside the 24h recent window
+        let mut recent_ids = Vec::new();
+        for i in 0..2 {
+            let b = backup_now(&d, None, "scheduled", &noop).unwrap();
+            let mut meta = b.clone();
+            meta.created_at = real_now - i * 60;
+            write_sidecar(&root, &meta).unwrap();
+            recent_ids.push(meta.id);
+        }
+
+        // 2 backups 5 days ago, same day bucket — only the newer should survive
+        let day5_noon = (real_now.div_euclid(86_400) - 5) * 86_400 + 12 * 3600;
+        let older_a = backup_now(&d, None, "scheduled", &noop).unwrap();
+        let mut meta_a = older_a.clone();
+        meta_a.created_at = day5_noon;
+        write_sidecar(&root, &meta_a).unwrap();
+        let older_b = backup_now(&d, None, "scheduled", &noop).unwrap();
+        let mut meta_b = older_b.clone();
+        meta_b.created_at = day5_noon - 3600;
+        write_sidecar(&root, &meta_b).unwrap();
+
+        // a pre-restore one, far outside any window — must survive regardless
+        let pr = backup_now(&d, None, "pre-restore", &noop).unwrap();
+        let mut pr_meta = pr.clone();
+        pr_meta.created_at = real_now - 90 * 86_400;
+        write_sidecar(&root, &pr_meta).unwrap();
+
+        prune_tiered(&d, 24, 30);
+        let left = list(&d);
+        let left_ids: HashSet<String> = left.iter().map(|b| b.id.clone()).collect();
+
+        for id in &recent_ids {
+            assert!(left_ids.contains(id), "recent backup {id} should survive");
+        }
+        assert!(left_ids.contains(&meta_a.id), "the newer of the same-day pair should survive");
+        assert!(!left_ids.contains(&meta_b.id), "the older of the same-day pair should be thinned");
+        assert!(left_ids.contains(&pr.id), "pre-restore must survive tiered pruning too");
 
         let _ = fs::remove_dir_all(&d);
     }

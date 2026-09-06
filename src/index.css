@@ -177,6 +177,63 @@
   --cp-sh-3: 0 18px 44px -12px #00000026, 0 4px 12px #00000014;
 }
 
+/* ---- Premium themes: surfaces/ink/accent only — ok/warn/bad/info stay the
+   root dark values on purpose, since these two are dark-based like the
+   default and the same status colors already have enough contrast; only a
+   theme built on a *light* background (see :root[data-theme="light"] above)
+   actually needs those redefined. ---------------------------------------- */
+:root[data-theme="midnight"] {
+  --cp-bg: #0a0e17;
+  --cp-surface: #10151f;
+  --cp-surface-2: #161c28;
+  --cp-surface-3: #1c2330;
+  --cp-surface-4: #242c3b;
+  --cp-console: #070a10;
+
+  --cp-line-soft: #1a212c;
+  --cp-line: #252d3a;
+  --cp-line-strong: #34404f;
+
+  --cp-ink: #eef1f5;
+  --cp-ink-dim: #a8b0bd;
+  --cp-ink-faint: #838da0;
+  --cp-ink-ghost: #5f6878;
+
+  --cp-accent: #3ea6ff;
+  --cp-accent-hover: #5cb6ff;
+  --cp-accent-press: #2b8fe0;
+  --cp-accent-soft: #8fcaff;
+  --cp-accent-muted: #0d2438;
+  --cp-accent-line: #3ea6ff40;
+  --cp-on-accent: #001322;
+}
+
+:root[data-theme="sunset"] {
+  --cp-bg: #150a12;
+  --cp-surface: #1e0f1a;
+  --cp-surface-2: #271521;
+  --cp-surface-3: #301c29;
+  --cp-surface-4: #3a2333;
+  --cp-console: #100810;
+
+  --cp-line-soft: #241522;
+  --cp-line: #33202e;
+  --cp-line-strong: #452c40;
+
+  --cp-ink: #f5eef2;
+  --cp-ink-dim: #c2adbd;
+  --cp-ink-faint: #a08d9b;
+  --cp-ink-ghost: #7a6b75;
+
+  --cp-accent: #ff4fa3;
+  --cp-accent-hover: #ff6fb5;
+  --cp-accent-press: #e0398c;
+  --cp-accent-soft: #ff8ec4;
+  --cp-accent-muted: #331020;
+  --cp-accent-line: #ff4fa340;
+  --cp-on-accent: #1a0010;
+}
+
 /* ============================================================================
    Tailwind mapping. `inline` keeps the var reference so themes swap live.
    ========================================================================== */
@@ -336,35 +393,23 @@ pre,
   font-feature-settings: "zero" 1;
 }
 
-/* ---- scrollbars: thin, square, transparent track — only visible where
-   content actually scrolls. Square corners (no border-radius) instead of
-   a pill, and a translucent fill instead of a solid one, so it reads as
-   part of the dark UI instead of a bright OS-default bar pasted on top
-   (the exact look on WebView builds that don't fully honor the styling
-   below — Chromium's own scrollbar-width/scrollbar-color support). ---- */
+/* ---- scrollbars: hidden, not just thinned. A previous attempt tried to
+   restyle the native bar (thin width, translucent thumb) via
+   scrollbar-width/-color plus ::-webkit-scrollbar-*, but on at least one
+   platform's WebView that styling doesn't take and it falls back to a
+   plain, always-visible, OS-grey bar sitting on top of a custom dark UI —
+   exactly the "basic scroll wheel thing" that reads as unfinished chrome.
+   Hiding it outright is the version that actually looks the same
+   everywhere: content still scrolls fine by wheel/trackpad/keyboard,
+   there's just nothing drawn for it. ---- */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--cp-line-strong) 55%, transparent) transparent;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge */
 }
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--cp-line) 55%, transparent);
-  border: 3px solid transparent;
-  background-clip: content-box;
-  border-radius: 0;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--cp-line-strong) 75%, transparent);
-  background-clip: content-box;
-}
-*::-webkit-scrollbar-corner {
-  background: transparent;
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* ---- focus: always visible, never on a mouse click ---------------------- */

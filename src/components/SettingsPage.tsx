@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { usePremium } from "../PremiumContext";
+import { applyTheme, THEMES } from "../theme";
 import type {
   AppSettings,
   BackupsConfig,
@@ -33,6 +35,7 @@ const DEFAULTS: AppSettings = {
   expertMode: false,
   keepServersOnQuit: false,
   stayAwakeOnPower: false,
+  theme: "",
 };
 
 type Tab = "general" | "account" | "premium" | "updates" | "java" | "backups" | "diagnostics" | "about";
@@ -91,6 +94,24 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
   const set = <K extends keyof AppSettings>(k: K, v: AppSettings[K]) =>
     setS((x) => ({ ...x, [k]: v }));
 
+  // Themes are the one setting that saves itself the instant you pick it,
+  // rather than waiting on the "Save changes" button like everything else
+  // here — the point of a theme switch is that it's immediately visible,
+  // and that includes still being there on next launch. Persists on top
+  // of `saved` (the last-confirmed-on-disk settings), not `s`, so clicking
+  // a swatch can't silently also save some *other* still-unsaved edit
+  // sitting in the form.
+  async function pickTheme(id: string) {
+    applyTheme(id);
+    setS((x) => ({ ...x, theme: id }));
+    setSaved((x) => ({ ...x, theme: id }));
+    try {
+      await api.appSettingsSet({ ...saved, theme: id });
+    } catch (e) {
+      toast.bad("Couldn't save the theme", String(e));
+    }
+  }
+
   async function save() {
     setBusy(true);
     try {
@@ -135,7 +156,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
         <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "general" && "hidden")}>
-          <GeneralTab s={s} set={set} />
+          <GeneralTab s={s} set={set} onPickTheme={pickTheme} />
         </div>
         {visited.has("account") && (
           <div className={cx("mx-auto max-w-2xl space-y-4", tab !== "account" && "hidden")}>
@@ -182,12 +203,62 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
 function GeneralTab({
   s,
   set,
+  onPickTheme,
 }: {
   s: AppSettings;
   set: <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => void;
+  onPickTheme: (id: string) => void;
 }) {
+  const { active: premiumActive } = usePremium();
   return (
     <>
+    {premiumActive && (
+      <Card
+        title="Theme"
+        icon="palette"
+        description="Applies immediately — no restart, no Save button."
+        right={
+          <Badge tone="accent" icon="crown" size="sm">
+            Premium
+          </Badge>
+        }
+      >
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          {THEMES.map((t) => {
+            const current = (s.theme || "dark") === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onPickTheme(t.id)}
+                aria-current={current}
+                className={cx(
+                  "flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors",
+                  current
+                    ? "border-accent-line bg-accent-muted"
+                    : "border-line-soft hover:border-line",
+                )}
+              >
+                <span
+                  className="flex h-10 w-full items-center justify-center gap-1 overflow-hidden rounded-md border border-line-soft"
+                  style={{ background: t.swatch.bg }}
+                >
+                  <span
+                    className="h-4 w-4 rounded-full"
+                    style={{ background: t.swatch.accent }}
+                  />
+                  <span
+                    className="h-4 w-8 rounded-sm"
+                    style={{ background: t.swatch.surface }}
+                  />
+                </span>
+                <span className="text-xs font-medium text-ink">{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    )}
     <Card title="Defaults for new servers" icon="sliders">
       <Field label="Default Java" hint="used for new servers — blank = whatever's on PATH">
         <TextInput
@@ -479,7 +550,10 @@ function BackupsTab() {
 
   async function saveKeep(n: number) {
     const v = Math.max(0, Math.min(1000, Math.floor(n)));
-    setBackupsCfg({ keep: v });
+    // Only `keep` changes here — `tiered` (Premium's alternative retention
+    // policy, set from a server's own Backups tab) is preserved as-is,
+    // not reset, since this card doesn't touch it.
+    setBackupsCfg((cur) => ({ keep: v, tiered: cur?.tiered ?? null }));
     try {
       await api.setBackupsKeep(v);
     } catch (e) {
@@ -491,7 +565,11 @@ function BackupsTab() {
     <Card
       title="Local backup retention"
       icon="archive"
-      description="Applies to every server — oldest backups get pruned first. Turned on per-server in its Backups tab."
+      description={
+        backupsCfg?.tiered
+          ? "Not in effect — Premium's smart retention (set from a server's Backups tab) is governing pruning instead."
+          : "Applies to every server — oldest backups get pruned first. Turned on per-server in its Backups tab."
+      }
     >
       <Field label="Keep newest" hint="0 = unlimited">
         <div className="flex items-center gap-2">
@@ -499,9 +577,10 @@ function BackupsTab() {
             type="number"
             min={0}
             max={1000}
+            disabled={!!backupsCfg?.tiered}
             value={backupsCfg?.keep ?? ""}
             onChange={(e) => saveKeep(Number(e.target.value))}
-            className="w-24 rounded border border-line bg-surface-2 px-2 py-1.5 text-sm text-ink"
+            className="w-24 rounded border border-line bg-surface-2 px-2 py-1.5 text-sm text-ink disabled:opacity-40"
           />
           <span className="text-2xs text-ink-faint">backups per server</span>
         </div>
@@ -717,6 +796,14 @@ function PremiumTab() {
             {new Date(status.currentPeriodEnd).toLocaleDateString()}
           </div>
         )}
+        <ul className="mt-3 space-y-1 border-t border-line-soft pt-3 text-2xs text-ink-dim">
+          <li>• Full app themes — Settings → General</li>
+          <li>• Time Machine snapshots — per-server Automation and Backups</li>
+          <li>• Performance alerts — on automatically, no toggle needed</li>
+          <li>• Backup verification — every zip re-read after saving, on automatically</li>
+          <li>• Smart backup retention — per-server Backups tab</li>
+          <li>• Bulk start/stop/backup — the Overview, once you've got 2+ servers</li>
+        </ul>
         <div className="mt-4 flex gap-2 border-t border-line-soft pt-4">
           <Button variant="secondary" size="sm" onClick={recheck} disabled={busy}>
             Re-check status

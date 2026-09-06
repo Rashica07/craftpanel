@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { TitleBar } from "./components/TitleBar";
+import { PremiumProvider } from "./PremiumContext";
 import "./index.css";
 
 /**
@@ -38,11 +39,13 @@ document.addEventListener("contextmenu", (e) => {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <div className="flex h-full flex-col">
-      <TitleBar />
-      <div className="min-h-0 flex-1">
-        <App />
+    <PremiumProvider>
+      <div className="flex h-full flex-col">
+        <TitleBar />
+        <div className="min-h-0 flex-1">
+          <App />
+        </div>
       </div>
-    </div>
+    </PremiumProvider>
   </React.StrictMode>,
 );

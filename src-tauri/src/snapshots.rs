@@ -17,7 +17,6 @@
 //! a replacement. A restore still takes a full zip safety-net backup first,
 //! same as `backups::restore` does.
 
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -184,30 +183,12 @@ pub fn prune(dir: &Path, keep_recent_hours: u32, keep_daily_days: u32) {
     if all.is_empty() {
         return;
     }
-    let now = now();
-    let recent_cutoff = now - keep_recent_hours as i64 * 3600;
-    let now_day = now.div_euclid(86400);
-
-    let mut keep_ids: HashSet<String> = HashSet::new();
-    let mut best_per_day: HashMap<i64, &Snapshot> = HashMap::new();
-
-    for s in &all {
-        if s.created_at >= recent_cutoff {
-            keep_ids.insert(s.id.clone());
-            continue;
-        }
-        let day = s.created_at.div_euclid(86400);
-        let age_days = now_day - day;
-        if age_days > keep_daily_days as i64 {
-            continue; // past the retention window entirely
-        }
-        let better = best_per_day.get(&day).is_none_or(|cur| s.created_at > cur.created_at);
-        if better {
-            best_per_day.insert(day, s);
-        }
-    }
-    keep_ids.extend(best_per_day.values().map(|s| s.id.clone()));
-
+    let keep_ids = crate::retention::tiered_keep_ids(
+        now(),
+        all.iter().map(|s| (s.id.as_str(), s.created_at)),
+        keep_recent_hours,
+        keep_daily_days,
+    );
     for s in &all {
         if !keep_ids.contains(&s.id) {
             let _ = delete(dir, &s.id);
@@ -271,6 +252,7 @@ pub fn restore(dir: &Path, id: &str, progress: &Progress<'_>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn server(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("cp-snap-{tag}-{:?}", std::thread::current().id()));

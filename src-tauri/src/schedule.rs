@@ -190,14 +190,22 @@ impl Scheduler {
         let app = self.app.clone();
         std::thread::spawn(move || {
             let p = std::path::Path::new(&dir);
-            let keep = app
-                .try_state::<Db>()
-                .and_then(|db| db.get_setting("backups.keep").ok().flatten())
-                .and_then(|s| s.parse::<usize>().ok())
-                .unwrap_or(20);
+            let db_state = app.try_state::<Db>();
+            let premium = db_state.as_deref().is_some_and(crate::premium::is_active);
             match crate::backups::backup_now(p, Some(&trigger), "scheduled", &|_| {}) {
-                Ok(_meta) => {
-                    crate::backups::prune(p, keep);
+                Ok(meta) => {
+                    if premium {
+                        let _ = crate::backups::verify_and_record(p, &meta.id);
+                    }
+                    // Same tiered-vs-plain decision as the manual backup_now
+                    // command — falls back to the plain "keep newest 20" if
+                    // Db state genuinely isn't up yet (shouldn't happen once
+                    // the app's actually running, but this thread has no
+                    // other fallback to reach for).
+                    match &db_state {
+                        Some(db) => crate::commands::prune_backups(p, db),
+                        None => crate::backups::prune(p, 20),
+                    }
                     let _ = app.emit(
                         "server:log",
                         serde_json::json!({ "server_id": id, "seq": 0, "stream": "system",
@@ -357,18 +365,28 @@ impl Scheduler {
             }
 
             // --- Time Machine snapshot (independent of the zip backups above) ---
+            // Premium. Checked here, not just hidden in the UI, so a config
+            // saved while Premium was active doesn't quietly keep running
+            // for free once it lapses.
             if running {
                 if let Some(mins) = sch.snapshot_interval_mins.filter(|m| *m > 0) {
                     let interval_secs = mins.max(5) as i64 * 60;
                     if now_epoch - ds.last_snapshot >= interval_secs {
                         ds.last_snapshot = now_epoch;
                         drop(st);
-                        self.run_snapshot(
-                            &rec.id,
-                            &rec.path,
-                            sch.snapshot_recent_hours(),
-                            sch.snapshot_daily_days(),
-                        );
+                        if crate::premium::is_active(&db) {
+                            self.run_snapshot(
+                                &rec.id,
+                                &rec.path,
+                                sch.snapshot_recent_hours(),
+                                sch.snapshot_daily_days(),
+                            );
+                        } else {
+                            self.console(
+                                &rec.id,
+                                "scheduled Time Machine snapshot skipped — Premium required (Settings → Premium)",
+                            );
+                        }
                         continue;
                     }
                 }

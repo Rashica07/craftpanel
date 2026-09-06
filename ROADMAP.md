@@ -2085,6 +2085,81 @@ deployment itself is blocked on the account owner's API token missing
 Workers Scripts/KV Storage Edit permission — confirmed via two real
 failed calls, not assumed.
 
+## Batch 35 — the actual Premium feature set (v3.1.0, 2026-09-06)
+
+v3.0.0 shipped the licensing plumbing with nothing to gate. This is what
+gates — every one of these is a real, tested feature behind
+`premium::is_active`, not a placeholder.
+
+- **Full app themes** (`theme.ts`, `index.css`) — Dark (free, unchanged
+  default), Light, Midnight, Sunset. Settings → General shows the picker
+  only when Premium's active; picking one applies instantly (one
+  `data-theme` attribute) and saves itself immediately rather than
+  waiting on the page's own "Save changes" button, so it can't be lost by
+  closing Settings right after.
+- **`PremiumContext`** — one shared "is Premium active" fetch (a real
+  re-validation against the licensing API at launch, not just the cached
+  flag) instead of every feature panel fetching its own copy. The
+  standing convention for everything below: not active → doesn't render
+  at all; active → renders normally with a small crown `Badge`.
+- **Time Machine snapshots made Premium**, on request. Gated where it's
+  actually enforced (the scheduler tick and the manual `snapshot_now`
+  command), not just hidden in the UI — a schedule saved while Premium
+  was active doesn't keep quietly running once it lapses. Existing
+  snapshots on disk stay browsable/restorable regardless of Premium
+  status; only *creating new ones* is gated. Also fixed a real, unrelated
+  UI bug found while touching this: the old scrubber-plus-single-detail
+  design made multiple real snapshots look like "just one, in a mostly
+  empty black box" — it's a proper list of every snapshot now, each with
+  its own Restore/Delete, matching how the zip backups list already
+  worked.
+- **Performance alerts** (`alerts.rs`) — piggybacks on the existing
+  once-a-minute metrics sampler rather than its own poller. TPS < 15,
+  RAM > 90% of allocation, disk < 2GB free (same bar `doctor.rs` uses),
+  each with a 15-minute cooldown per server so a stuck condition doesn't
+  spam. Delivered as a dedicated `premium:alert` event and toasted
+  globally — the existing `server:log` stream (which schedule.rs's own
+  crash/restart notices already use) only reaches you if that server's
+  console tab happens to be open, which defeats the point of an alert.
+- **Backup verification** (`backups.rs::verify`/`verify_and_record`) —
+  re-reads every entry in a freshly written zip, which is what actually
+  exercises the `zip` crate's CRC32 check (a zip can *open* fine while a
+  compressed entry's data is silently corrupt). Runs after every manual,
+  scheduled, and pre-version-change safety backup; the pre-version-change
+  one specifically **blocks the operation** if verification fails, since
+  that backup's whole job is being the rollback if the version swap goes
+  wrong. Shows a Verified/Failed-check badge per backup in the UI.
+- **Tiered backup retention** (`retention.rs`) — Premium can switch zip
+  backups from the plain "keep newest N" to the same "keep everything
+  recent, thin older to one per day" policy snapshots already used.
+  Pulled the actual retention algorithm into its own shared, pure,
+  clock-free module instead of leaving a second copy of it — refactored
+  `snapshots::prune` to use it too, confirmed via its own existing test
+  that nothing changed behaviorally.
+- **Bulk operations** (`Dashboard.tsx`) — checkboxes per server on the
+  Overview (Premium only), a bulk-action bar for Start/Stop/Back up
+  selected. Reports one honest summary ("3 backed up, 1 failed") via
+  `Promise.allSettled` instead of assuming every server in the batch
+  succeeded.
+- **Site**: pricing page's feature list was rewritten earlier this batch
+  to stop describing already-free features as Premium exclusives (most
+  of the originally-planned "Advanced automation" turned out to already
+  ship free); now, with everything above actually built, the "Premium's
+  features aren't built yet" checkout banner is gone too.
+
+**Verified:** `cargo test --lib` 169 passed (0 failed, 22 ignored) —
+including new tests for the alert cooldown logic, the founder-key
+verification, the backup-corruption CRC check (a real truncated zip, not
+a mocked failure), and the extracted retention algorithm against fixed
+timestamps (no more day-boundary flakiness risk from the old wall-clock
+test). `cargo check` clean, `npx tsc --noEmit` clean, `npm run build`
+clean.
+
+**Still not built:** genuinely-new automation (the original wishlist was
+almost entirely already-free) and CraftPanel Intelligence (explicitly
+speculative from the start) — both stay marked Roadmap on the pricing
+page rather than invented just to fill the category.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.

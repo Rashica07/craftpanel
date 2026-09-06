@@ -357,10 +357,19 @@ export interface AppSettings {
   expertMode: boolean;
   keepServersOnQuit: boolean;
   stayAwakeOnPower: boolean;
+  /** "" | "dark" | "light" | "midnight" | "sunset" — "" means "dark" too. */
+  theme: string;
 }
 
 export type PremiumPlan = "monthly" | "yearly" | "lifetime";
 export type PremiumSubStatus = "active" | "canceled" | "past_due";
+
+export interface PremiumAlert {
+  serverId: string;
+  serverName: string;
+  kind: "lowTps" | "highRam" | "lowDisk";
+  message: string;
+}
 
 export interface PremiumStatus {
   key: string;
@@ -520,10 +529,19 @@ export interface Backup {
   sizeBytes: number;
   label: string | null;
   trigger: "manual" | "pre-restore" | "scheduled";
+  /** Premium. null = never checked (free tier, or predates this feature). */
+  verified: boolean | null;
+}
+
+export interface TieredRetention {
+  recentHours: number;
+  dailyDays: number;
 }
 
 export interface BackupsConfig {
   keep: number;
+  /** Premium. When set, replaces `keep` as what governs pruning. */
+  tiered: TieredRetention | null;
 }
 
 export interface FileEntry {

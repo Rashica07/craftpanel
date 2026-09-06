@@ -12,9 +12,11 @@ import type {
   ModpackHit,
   ModpackInfo,
   ModpackSpec,
+  PremiumAlert,
   PremiumStatus,
   Backup,
   BackupsConfig,
+  TieredRetention,
   CrashReport,
   CreateSpec,
   CurseForgeInstallResult,
@@ -239,6 +241,9 @@ export const api = {
   },
   setBackupsKeep(keep: number): Promise<void> {
     return invoke("set_backups_keep", { keep });
+  },
+  setBackupsTiered(tiered: TieredRetention | null): Promise<void> {
+    return invoke("set_backups_tiered", { tiered });
   },
   onBackupProgress(
     fn: (p: { serverId: string; message: string }) => void,
@@ -633,5 +638,8 @@ export const api = {
   },
   onStatus(fn: (snap: ProcSnapshot) => void): Promise<UnlistenFn> {
     return listen<ProcSnapshot>("server:status", (e) => fn(e.payload));
+  },
+  onPremiumAlert(fn: (alert: PremiumAlert) => void): Promise<UnlistenFn> {
+    return listen<PremiumAlert>("premium:alert", (e) => fn(e.payload));
   },
 };

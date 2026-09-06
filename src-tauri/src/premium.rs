@@ -126,6 +126,15 @@ fn validate_remote(key: &str) -> Result<ValidateResponse, String> {
         .map_err(|e| format!("Licensing server returned bad JSON: {e}"))
 }
 
+/// For gating a Premium-only capability from other modules — reads the
+/// locally-cached status (fast, no network), same as the UI does via
+/// `premium_status_get`. Anything that fires in the background on a timer
+/// (the scheduler) or from a plain command should call this rather than
+/// re-implementing the "read the settings row" dance itself.
+pub fn is_active(db: &Db) -> bool {
+    read_status(db).active
+}
+
 /// Pure so it's testable without a real clock or a real coin flip.
 fn should_show_upsell(status: &PremiumStatus, now: i64, roll: f64) -> bool {
     if status.active || status.upsell_dismissed_forever {
@@ -250,6 +259,26 @@ mod tests {
         assert!(!verify_key_against_hash("CP-TEST-0000-0000-0000-0001", &hash));
         assert!(!verify_key_against_hash("", &hash));
         assert!(!is_founder_key("definitely not the real key"));
+    }
+
+    #[test]
+    fn is_active_reads_a_real_db_not_just_the_in_memory_struct() {
+        // Same real-temp-file-Db pattern as schedule.rs's own tests —
+        // this is what schedule::tick() actually calls to decide whether
+        // a scheduled Time Machine snapshot is allowed to run.
+        let file = std::env::temp_dir()
+            .join(format!("cp-premium-{:?}.db", std::thread::current().id()));
+        let _ = std::fs::remove_file(&file);
+        let db = Db::open(&file).unwrap();
+
+        assert!(!is_active(&db), "a fresh install has no premium status at all");
+
+        let mut status = read_status(&db);
+        status.active = true;
+        write_status(&db, &status).unwrap();
+        assert!(is_active(&db));
+
+        let _ = std::fs::remove_file(&file);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod adapter;
 mod admin;
+mod alerts;
 mod analytics;
 mod anticheat;
 mod attribution;
@@ -34,6 +35,7 @@ mod provision;
 mod rcon;
 mod remote_api;
 mod resourcepack;
+mod retention;
 mod schedule;
 mod session;
 mod settings;
@@ -259,6 +261,7 @@ pub fn run() {
             commands::restore_backup,
             commands::get_backups_config,
             commands::set_backups_keep,
+            commands::set_backups_tiered,
             commands::snapshot_now,
             commands::list_snapshots,
             commands::restore_snapshot,

@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use crate::adapter::ServerStatus;
+use crate::alerts::AlertState;
 use crate::db::Db;
 use crate::process::ProcessManager;
 use crate::rcon::RconPool;
@@ -35,11 +36,12 @@ fn now() -> i64 {
 
 pub struct MetricsSampler {
     app: AppHandle,
+    alert_state: AlertState,
 }
 
 impl MetricsSampler {
     pub fn new(app: AppHandle) -> Arc<Self> {
-        Arc::new(Self { app })
+        Arc::new(Self { app, alert_state: AlertState::default() })
     }
 
     pub fn start(self: Arc<Self>) {
@@ -55,6 +57,7 @@ impl MetricsSampler {
         let Some(pool) = self.app.try_state::<RconPool>() else { return };
         let Ok(servers) = db.list_servers() else { return };
         let ts = now();
+        let premium = crate::premium::is_active(&db);
 
         for rec in servers {
             let snap = procs.snapshot(&rec.id);
@@ -74,6 +77,10 @@ impl MetricsSampler {
             .flatten();
 
             let _ = db.insert_metric_sample(&rec.id, ts, ram_mb, cpu_pct, tps);
+
+            if premium {
+                crate::alerts::check(&self.app, &self.alert_state, &rec, ram_mb, tps);
+            }
         }
 
         let _ = db.prune_metric_samples(ts - RETENTION_SECS);
