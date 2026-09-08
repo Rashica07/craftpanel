@@ -2160,6 +2160,61 @@ almost entirely already-free) and CraftPanel Intelligence (explicitly
 speculative from the start) — both stay marked Roadmap on the pricing
 page rather than invented just to fill the category.
 
+## Batch 36 — a real NBT editor, and confirmations on every genuinely irreversible action (v3.2.0, 2026-09-07)
+
+Triggered by a pasted "bug report" that turned out to be mostly wrong on
+direct inspection (two claims — tray-quit killing servers with players
+online, and binary files rendering as garbled text — were flatly
+contradicted by code already in this repo, confirmed from every call
+path). What *did* hold up: no NBT editor, hardcore mode not warning it's
+one-way, and several destructive actions with zero confirmation at all.
+This batch is exactly those, verified individually rather than trusted
+wholesale.
+
+- **A real NBT editor** (`nbt.rs`, `NbtEditor.tsx`) — `level.dat`,
+  `playerdata/*.dat`, and anything else that's actually NBT. Built on the
+  `fastnbt` crate rather than a hand-rolled binary parser; transparently
+  gunzips on read and re-gzips on write only if the file was gzipped to
+  start with. Every primitive type, both array types, nested
+  lists/compounds, real round-trip tests through actual binary
+  serialization (not mocked). One real correctness bug caught before it
+  shipped: `i64` (world seeds, timestamps) routinely exceeds
+  `Number.MAX_SAFE_INTEGER` — serializing it as a plain JSON number would
+  have silently corrupted exactly the kind of value this feature exists
+  to show correctly, so `Long`/`LongArray` cross the Tauri/JSON boundary
+  as strings instead, with a dedicated test asserting the wire shape, not
+  just that round-tripping happens to work on the Rust side. No trash
+  folder for this one (unlike the rest of the file browser) — a `.bak`
+  copy of the previous file is kept instead, and the save button goes
+  through a confirm step that says plainly this can make the file
+  unreadable to Minecraft.
+- **Confirmations added to four things that had none**: Time Machine
+  snapshot delete (genuinely permanent, no trash — confirmed by reading
+  `snapshots::delete`), Force Kill (can corrupt an in-progress world
+  save — now explains why and suggests Stop instead), removing a Premium
+  key from the install (explains everything that turns off and that the
+  key itself isn't gone), and a corrected discovery: "Remove server" and
+  file/world/mod deletion already had good confirmations and are
+  trash-based — checked before assuming they needed the same treatment.
+- **Hardcore mode gets a real caveat** — `settings.rs`'s schema now says
+  plainly that toggling it doesn't retroactively affect an existing
+  world (the flag lives in that world's own save data) and that a death
+  under genuine hardcore is permanent. Documentation fix, not a code
+  workaround — the underlying Minecraft behavior isn't something
+  CraftPanel can change.
+
+**Verified:** `cargo test --lib` 174 passed (0 failed, 22 ignored) —
+including 5 new NBT tests (every type round-trips through real binary
+NBT and through gzip, a real corrupted/truncated file produces a clean
+error not a panic, a `.bak` genuinely holds the pre-edit data after a
+second write, and the i64-as-string JSON boundary is asserted directly,
+not just round-tripped). `cargo check` clean, `npx tsc --noEmit` clean,
+`npm run build` clean. Caught and fixed two of my own icon-name typos
+(`"code"`, `"alert-triangle"` — neither exists in `Icon.tsx`, both
+degrade silently to nothing rather than erroring) before they shipped,
+the same class of bug a pre-existing, unrelated line in `Dashboard.tsx`
+already has — flagged, not fixed, since it's out of this batch's scope.
+
 ## Other future ideas — sized, not yet scheduled
 
 - ✓ **A "doctor" pass in CraftPanel settings** — shipped, Batch 14.

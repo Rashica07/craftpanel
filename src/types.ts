@@ -566,6 +566,32 @@ export interface FileView {
   binary: boolean;
 }
 
+/**
+ * A generic NBT tree (level.dat, playerdata/*.dat). Long/LongArray carry
+ * their value as a string, not a number — an i64 world seed routinely
+ * exceeds Number.MAX_SAFE_INTEGER, and a plain JSON number would
+ * silently round it. Keep it a string all the way to the input field;
+ * only validate/parse it as an integer, never coerce it to `number`.
+ */
+export type NbtNode =
+  | { kind: "byte"; value: number }
+  | { kind: "short"; value: number }
+  | { kind: "int"; value: number }
+  | { kind: "long"; value: string }
+  | { kind: "float"; value: number }
+  | { kind: "double"; value: number }
+  | { kind: "string"; value: string }
+  | { kind: "byteArray"; value: number[] }
+  | { kind: "intArray"; value: number[] }
+  | { kind: "longArray"; value: string[] }
+  | { kind: "list"; value: NbtNode[] }
+  | { kind: "compound"; value: [string, NbtNode][] };
+
+export interface NbtFile {
+  root: NbtNode;
+  gzip: boolean;
+}
+
 export interface BannedEntry {
   name: string;
   reason: string | null;

@@ -24,6 +24,7 @@ mod minecraft;
 mod lock;
 mod modrinth;
 mod mods;
+mod nbt;
 mod net;
 mod perf;
 mod pluginconfig;
@@ -269,6 +270,8 @@ pub fn run() {
             commands::fs_list,
             commands::fs_read,
             commands::fs_write,
+            commands::nbt_read,
+            commands::nbt_write,
             commands::fs_mkdir,
             commands::fs_rename,
             commands::fs_delete,

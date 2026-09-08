@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { usePremium } from "../PremiumContext";
 import type { Snapshot } from "../types";
-import { Badge, Button, Card, StateBlock, Tooltip, cx, toast } from "./ui";
+import { Badge, Button, Card, Modal, StateBlock, Tooltip, cx, toast } from "./ui";
 import { Icon } from "./Icon";
 
 function size(bytes: number) {
@@ -43,6 +43,7 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
   const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +93,7 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
     setBusy(true);
     try {
       await api.deleteSnapshot(serverId, id);
+      setConfirmDelete(null);
       load();
     } catch (e) {
       toast.bad("Couldn't delete that snapshot", String(e));
@@ -218,7 +220,7 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
                           Restore
                         </Button>
                       </Tooltip>
-                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => del(s.id)}>
+                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmDelete(s)}>
                         Delete
                       </Button>
                     </div>
@@ -253,6 +255,36 @@ export function SnapshotTimeline({ serverId, locked }: { serverId: string; locke
         </div>
       )}
       {error && <p className="mt-2 text-2xs text-bad-soft">{error}</p>}
+
+      {confirmDelete && (
+        <Modal
+          title={`Delete this snapshot for good?`}
+          icon="trash"
+          size="sm"
+          onClose={() => setConfirmDelete(null)}
+          footer={
+            <>
+              <Button variant="quiet" className="mr-auto" onClick={() => setConfirmDelete(null)}>
+                Keep it
+              </Button>
+              <Button
+                variant="danger"
+                icon="trash"
+                loading={busy}
+                onClick={() => del(confirmDelete.id)}
+              >
+                Delete for good
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm leading-relaxed text-ink-dim">
+            {clock(confirmDelete.createdAt)} ({ago(confirmDelete.createdAt)}) — there's no trash
+            folder for Time Machine snapshots. Once it's gone, this exact rollback point can't be
+            recovered.
+          </p>
+        </Modal>
+      )}
     </Card>
   );
 }

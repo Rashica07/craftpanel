@@ -28,6 +28,8 @@ import type {
   DetectionResult,
   ExternalStatus,
   FileView,
+  NbtFile,
+  NbtNode,
   JavaInfo,
   JvmInfo,
   Listing,
@@ -277,6 +279,12 @@ export const api = {
   },
   fsWrite(id: string, path: string, content: string): Promise<void> {
     return invoke("fs_write", { id, path, content });
+  },
+  nbtRead(id: string, path: string): Promise<NbtFile> {
+    return invoke("nbt_read", { id, path });
+  },
+  nbtWrite(id: string, path: string, root: NbtNode, gzip: boolean): Promise<void> {
+    return invoke("nbt_write", { id, path, root, gzip });
   },
   fsMkdir(id: string, path: string): Promise<void> {
     return invoke("fs_mkdir", { id, path });

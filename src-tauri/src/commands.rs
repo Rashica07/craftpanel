@@ -1218,6 +1218,38 @@ pub fn fs_write(db: State<Db>, id: String, path: String, content: String) -> Res
     files::write(std::path::Path::new(&rec.path), &path, &content)
 }
 
+/// `.dat` files (level.dat, playerdata/*.dat) are binary NBT — `fs_read`
+/// deliberately refuses to dump them as text (see `files::read`'s binary
+/// check). These two are the dedicated path: parse to a tree the frontend
+/// can render and edit, and write it back.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NbtFile {
+    pub root: crate::nbt::NbtNode,
+    pub gzip: bool,
+}
+
+#[tauri::command]
+pub fn nbt_read(db: State<Db>, id: String, path: String) -> Result<NbtFile, String> {
+    let rec = load(&db, &id)?;
+    let full = files::resolve(std::path::Path::new(&rec.path), &path)?;
+    let (root, gzip) = crate::nbt::read(&full)?;
+    Ok(NbtFile { root, gzip })
+}
+
+#[tauri::command]
+pub fn nbt_write(
+    db: State<Db>,
+    id: String,
+    path: String,
+    root: crate::nbt::NbtNode,
+    gzip: bool,
+) -> Result<(), String> {
+    let rec = load(&db, &id)?;
+    let full = files::resolve(std::path::Path::new(&rec.path), &path)?;
+    crate::nbt::write(&full, root, gzip)
+}
+
 #[tauri::command]
 pub fn fs_mkdir(db: State<Db>, id: String, path: String) -> Result<(), String> {
     let rec = load(&db, &id)?;

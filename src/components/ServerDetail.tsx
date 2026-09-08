@@ -14,6 +14,7 @@ import {
   Banner,
   Button,
   IconButton,
+  Modal,
   Segmented,
   StatusDot,
   Tabs,
@@ -202,6 +203,7 @@ export function ServerDetail({
   const [disablingSuspect, setDisablingSuspect] = useState(false);
   const [showChangeVersion, setShowChangeVersion] = useState(false);
   const [showClone, setShowClone] = useState(false);
+  const [confirmForceKill, setConfirmForceKill] = useState(false);
 
   const status = runtime?.status ?? "stopped";
   const active =
@@ -485,7 +487,7 @@ export function ServerDetail({
                 {
                   icon: "power",
                   label: "Force kill",
-                  run: () => run(() => api.killServer(server.id)),
+                  run: () => setConfirmForceKill(true),
                   danger: true,
                   disabled: !active || busy,
                 },
@@ -876,6 +878,41 @@ export function ServerDetail({
           onClose={() => setShowClone(false)}
           onCloned={() => onServersChanged()}
         />
+      )}
+      {confirmForceKill && (
+        <Modal
+          title="Force kill this server?"
+          icon="power"
+          size="sm"
+          onClose={() => setConfirmForceKill(false)}
+          footer={
+            <>
+              <Button variant="quiet" className="mr-auto" onClick={() => setConfirmForceKill(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                icon="power"
+                loading={busy}
+                onClick={() =>
+                  run(async () => {
+                    await api.killServer(server.id);
+                    setConfirmForceKill(false);
+                  })
+                }
+              >
+                Force kill it
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm leading-relaxed text-ink-dim">
+            This ends the process immediately, skipping the graceful "stop" that lets Minecraft
+            finish writing chunks to disk. If it's in the middle of a save, the world can come out
+            corrupted — there's no undo once that happens. Use regular Stop unless the server is
+            genuinely stuck.
+          </p>
+        </Modal>
       )}
     </div>
   );

@@ -57,8 +57,10 @@ fn mtime(m: &fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-/// Resolve `rel` under `root`, rejecting anything that would leave the folder.
-fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
+/// Resolve `rel` under `root`, rejecting anything that would leave the
+/// folder. `pub(crate)` so `nbt.rs`'s commands can resolve a path the same
+/// safe way instead of duplicating this.
+pub(crate) fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let mut out = root.to_path_buf();
     for comp in Path::new(rel.trim_start_matches(['/', '\\'])).components() {
         match comp {

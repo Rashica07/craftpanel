@@ -18,6 +18,7 @@ import {
   Card,
   CopyField,
   Field,
+  Modal,
   ProgressBar,
   StatusDot,
   Tabs,
@@ -728,6 +729,7 @@ function PremiumTab() {
   const [keyInput, setKeyInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   const load = () => {
     api.premiumStatusGet().then(setStatus).catch(() => {});
@@ -761,6 +763,7 @@ function PremiumTab() {
     setBusy(true);
     try {
       await api.premiumDeactivate();
+      setConfirmDeactivate(false);
       load();
     } finally {
       setBusy(false);
@@ -808,10 +811,34 @@ function PremiumTab() {
           <Button variant="secondary" size="sm" onClick={recheck} disabled={busy}>
             Re-check status
           </Button>
-          <Button variant="ghost" size="sm" onClick={deactivate} disabled={busy}>
+          <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)} disabled={busy}>
             Remove key from this install
           </Button>
         </div>
+        {confirmDeactivate && (
+          <Modal
+            title="Remove your Premium key from this install?"
+            icon="crown"
+            size="sm"
+            onClose={() => setConfirmDeactivate(false)}
+            footer={
+              <>
+                <Button variant="quiet" className="mr-auto" onClick={() => setConfirmDeactivate(false)}>
+                  Cancel
+                </Button>
+                <Button variant="danger" icon="crown" loading={busy} onClick={deactivate}>
+                  Remove it
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm leading-relaxed text-ink-dim">
+              Everything Premium unlocks here — themes, alerts, snapshots, smart retention, bulk
+              actions — turns off immediately. Your key itself isn't deleted anywhere but this
+              computer; paste it back in any time to reactivate.
+            </p>
+          </Modal>
+        )}
       </Card>
     );
   }

@@ -18,6 +18,7 @@ import {
   toast,
 } from "./ui";
 import { ErrorBanner } from "./ErrorBanner";
+import { NbtEditor } from "./NbtEditor";
 import { Icon } from "./Icon";
 
 /**
@@ -118,6 +119,7 @@ export function FilesPanel({ serverId }: { serverId: string }) {
   const [renameTo, setRenameTo] = useState("");
   const [deleting, setDeleting] = useState<FileEntry | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [nbtPath, setNbtPath] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api
@@ -216,15 +218,26 @@ export function FilesPanel({ serverId }: { serverId: string }) {
             state="empty"
             icon="file"
             title="This one isn't text"
-            message="It's a binary file — an image, a jar, a region file. Editing it here would corrupt it."
+            message={
+              open.rel.toLowerCase().endsWith(".dat")
+                ? "It's binary — probably NBT save data (level.dat, playerdata). Open it as NBT to view or edit the actual fields, or just export a copy."
+                : "It's a binary file — an image, a jar, a region file. Editing it here would corrupt it."
+            }
             action={
-              <Button
-                variant="secondary"
-                icon="download"
-                onClick={() => api.fsExport(serverId, open.rel)}
-              >
-                Save a copy
-              </Button>
+              <div className="flex gap-2">
+                {open.rel.toLowerCase().endsWith(".dat") && (
+                  <Button variant="primary" icon="layers" onClick={() => setNbtPath(open.rel)}>
+                    Open as NBT
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  icon="download"
+                  onClick={() => api.fsExport(serverId, open.rel)}
+                >
+                  Save a copy
+                </Button>
+              </div>
             }
           />
         ) : (
@@ -556,6 +569,9 @@ export function FilesPanel({ serverId }: { serverId: string }) {
             Nothing is deleted for good, so you can put it back by hand.
           </p>
         </Modal>
+      )}
+      {nbtPath && (
+        <NbtEditor serverId={serverId} path={nbtPath} onClose={() => setNbtPath(null)} />
       )}
     </div>
   );
