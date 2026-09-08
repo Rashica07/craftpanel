@@ -17,9 +17,10 @@ ALLOWED_ORIGINS = "https://rashica07.github.io,http://localhost:8935"
 
 # Price IDs from the Stripe Dashboard (Product catalog → Prices). Not
 # secret — just IDs — so they live here rather than as `wrangler secret`.
-STRIPE_PRICE_MONTHLY = "price_1UChkdCxOclMsWNa5avJ71HD"
-STRIPE_PRICE_YEARLY = "price_1UChkeCxOclMsWNa23rpemCS"
-STRIPE_PRICE_LIFETIME = "price_1UChkfCxOclMsWNaCOK6ZDIr"
+# LIVE MODE as of 2026-09-08 — these charge real cards.
+STRIPE_PRICE_MONTHLY = "price_1UDSXfCfgxs3Bvp1a3c6Ebgr"
+STRIPE_PRICE_YEARLY = "price_1UDSXhCfgxs3Bvp1afNrmrhY"
+STRIPE_PRICE_LIFETIME = "price_1UDSXiCfgxs3Bvp1HkAUnNiu"
 
 # Actual secrets (never go in this file — set with `wrangler secret put <NAME>`):
 #   STRIPE_SECRET_KEY       sk_test_... or sk_live_...

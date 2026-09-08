@@ -4,19 +4,21 @@ Stripe Checkout + webhook + license-key API for CraftPanel Premium, as one
 Cloudflare Worker. No database beyond Cloudflare KV — a license record is
 just `{ key, email, plan, status, stripeCustomerId, ... }`.
 
-**Status: fully wired, live in Stripe test mode.** Deployed at
-`https://craftpanel-licensing.kristiangjergji20.workers.dev`, Product +
-3 real Prices created, webhook registered, secrets set, and
-`CraftPanel Landing/premium.html` points at it with the real publishable
-key. Verified end-to-end in-browser: clicking a plan button on the real
-site mounts a genuine Stripe embedded Checkout (TEST MODE ribbon, correct
-product/price, working card fields) — confirmed by an actual `POST
-/api/checkout` call and a real mounted iframe, not just reading the code.
+**Status: LIVE as of 2026-09-08. Real cards can be charged.** Deployed at
+`https://craftpanel-licensing.kristiangjergji20.workers.dev` with a live
+Product (`prod_VDuMxL5lznGMdi`), 3 live Prices, a live webhook
+(`we_1UDSXwCfgxs3Bvp12uE0ompu`), live secrets, and
+`CraftPanel Landing/premium.html` pointed at the live publishable key.
+Verified without charging anyone: a real `POST /api/checkout` against
+the live Worker returns a genuine `clientSecret` — session creation
+alone doesn't charge a card, so that's as far as automated verification
+here goes deliberately. A real end-to-end purchase (real card, real €)
+hasn't been run by this session and shouldn't be, for obvious reasons.
 
-Only remaining step to charge real cards: swap `sk_test_`/`pk_test_` for
-`sk_live_`/`pk_live_` (a new webhook + prices in live mode too — Stripe
-keeps test and live completely separate) once the account owner has
-completed Stripe's identity/payout verification in their own dashboard.
+The test-mode Product/Prices/webhook from before (`prod_VD80KR7raQYwr2`
+and friends) still exist in the Stripe account's test-mode view if
+you ever want to test something without it touching real money again —
+just re-point the Worker's secrets back at the test keys temporarily.
 
 ## What it exposes
 
@@ -36,54 +38,51 @@ completed Stripe's identity/payout verification in their own dashboard.
 - `GET /api/license/validate?key=...` — this is the one the **Tauri app**
   calls to check a key. Returns `{ valid, plan, status, currentPeriodEnd }`.
 
-## Setup — all done, test mode
+## Setup — all done, live mode
 
-1. ✓ **Stripe (test mode).** Product `prod_VD80KR7raQYwr2` ("CraftPanel
-   Premium"), three prices (`price_1UChkdCxOclMsWNa5avJ71HD` monthly,
-   `price_1UChkeCxOclMsWNa23rpemCS` yearly,
-   `price_1UChkfCxOclMsWNaCOK6ZDIr` lifetime — all already in
-   `wrangler.toml`), and a webhook endpoint (`we_1UChkmCxOclMsWNa8dOBnvjt`)
-   listening for `checkout.session.completed`, `invoice.paid`,
-   `customer.subscription.deleted`, `invoice.payment_failed` all exist in
-   the account's test mode. Link is on by default, nothing to configure.
+1. ✓ **Stripe (live).** Product `prod_VDuMxL5lznGMdi` ("CraftPanel
+   Premium"), three prices (`price_1UDSXfCfgxs3Bvp1a3c6Ebgr` monthly,
+   `price_1UDSXhCfgxs3Bvp1afNrmrhY` yearly,
+   `price_1UDSXiCfgxs3Bvp1HkAUnNiu` lifetime — all in `wrangler.toml`),
+   and a live webhook (`we_1UDSXwCfgxs3Bvp12uE0ompu`) listening for
+   `checkout.session.completed`, `invoice.paid`,
+   `customer.subscription.deleted`, `invoice.payment_failed`. Link is on
+   by default, nothing to configure.
 
 2. ✓ **Cloudflare.** KV namespace (`LICENSES`, id
    `a153cd5bb8464cb7913853e64f8189a1`) and the Worker deployed at
    `https://craftpanel-licensing.kristiangjergji20.workers.dev`.
 
-3. ✓ **Secrets.** `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are set
-   on the Worker (`wrangler secret put`, not in any file in this repo).
+3. ✓ **Secrets.** `STRIPE_SECRET_KEY` (live) and `STRIPE_WEBHOOK_SECRET`
+   (live) are set on the Worker (`wrangler secret put`, not in any file
+   in this repo).
 
-4. ✓ **Site.** `CraftPanel Landing/premium.html` has both `LICENSING_API`
-   and `STRIPE_PUBLISHABLE_KEY` set to the real (test-mode) values — the
-   "Get monthly / yearly / lifetime" buttons open a genuine embedded
-   Stripe Checkout, confirmed working end-to-end in a real browser.
+4. ✓ **Site.** `CraftPanel Landing/premium.html` has `LICENSING_API` and
+   the live `STRIPE_PUBLISHABLE_KEY` set — the "Get monthly / yearly /
+   lifetime" buttons open a genuine, live embedded Stripe Checkout.
+   Verified without charging anyone: a real `POST /api/checkout` returns
+   a genuine `clientSecret` — that's as far as this session's own
+   automated verification goes, deliberately, since actually completing
+   a purchase would be a real charge.
 
 5. ✓ **Tauri app.** `src-tauri/src/premium.rs` + Settings → Premium
    activate/validate/deactivate a key against `GET
    /api/license/validate`, with a background re-check on launch. Gating
    actual Premium *features* (automation, monitoring, etc.) behind
-   `active` is separate, unbuilt work — this only covers whether a key is
-   valid, not what it unlocks yet.
+   `active` is separate work, tracked in the main repo's `ROADMAP.md`.
 
-## Going live (real cards)
+## Test mode, if you need it again
 
-Everything above is Stripe **test mode** — no real card can be charged
-regardless of what anyone enters. To accept real payments:
-
-1. In the Stripe Dashboard, flip to **Live mode** and repeat the Product
-   + 3 Prices + webhook endpoint creation there (test and live are
-   completely separate — nothing carries over automatically). This
-   requires Stripe to have your identity/bank details for payouts,
-   entered by you in their dashboard — not something done here.
-2. `wrangler secret put STRIPE_SECRET_KEY` (the `sk_live_...` one),
-   `wrangler secret put STRIPE_WEBHOOK_SECRET` (the new live webhook's
-   secret), update the 3 price IDs in `wrangler.toml`, `npm run deploy`.
-3. Swap `STRIPE_PUBLISHABLE_KEY` in `premium.html` for the `pk_live_...`
-   key, push the site.
-
-Test mode's own card is `4242 4242 4242 4242`, any future expiry/CVC, if
-you want to run through a purchase yourself before going live.
+The original test-mode Product (`prod_VD80KR7raQYwr2`), its 3 prices, and
+webhook (`we_1UChkmCxOclMsWNa8dOBnvjt`) are all still sitting in the
+Stripe account's test-mode view — nothing about going live deleted them.
+To test something without touching real money: `wrangler secret put
+STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` back to the `sk_test_`/
+`whsec_...` test values, swap the 3 price IDs in `wrangler.toml` back to
+the test ones above, `npm run deploy`, and swap
+`STRIPE_PUBLISHABLE_KEY` in `premium.html` back to `pk_test_...` — then
+reverse all of that to go live again. Stripe's own test card is
+`4242 4242 4242 4242`, any future expiry/CVC.
 
 ## What's deliberately not built yet
 
