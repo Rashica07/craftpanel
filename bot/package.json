@@ -1,0 +1,26 @@
+{
+  "name": "craftpanel-bot",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Localized Discord companion bot for CraftPanel — talks to the desktop app's Remote API on the same machine/LAN.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "deploy": "npm run build && node --env-file-if-exists=.env dist/deploy-commands.js",
+    "setup-server": "npm run build && node --env-file-if-exists=.env dist/scripts/setupServer.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "systeminformation": "^5.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "~5.8.3"
+  }
+}

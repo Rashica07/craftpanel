@@ -1,0 +1,36 @@
+[package]
+name = "mobile"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+tar = "0.4"
+
+# Reading the bundled JRE tarball goes through Android's own AssetManager via
+# raw JNI (not Tauri's resource_dir()/fs-plugin abstraction) — that asset://
+# path-resolution has open reliability issues on Android as of this writing,
+# whereas AssetManager.open() is the standard, well-documented mechanism
+# every native-Android app already relies on.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+libloading = "0.8"
+

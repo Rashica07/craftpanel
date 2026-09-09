@@ -61,9 +61,20 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
   }
 
   const stripe = stripeClient(env);
-  const origin = req.headers.get("Origin") || env.ALLOWED_ORIGINS.split(",")[0];
   const mode = plan === "lifetime" ? "payment" : "subscription";
   const lineItems = [{ price: priceIdFor(env, plan), quantity: 1 }];
+
+  // The fallback below is deliberately a hardcoded *full path*, not
+  // built from the request's Origin header. A real live purchase 404'd
+  // on return because `${origin}` is only scheme+host
+  // ("https://rashica07.github.io") — it has no idea the site is a
+  // GitHub Pages *project* page actually served under
+  // "/craftpanel-site/", not the domain root. The frontend now always
+  // sends its own real `returnUrl` (see premium.html), so this fallback
+  // should only ever matter for a caller that skips that — but it has
+  // to be right on its own too, not just usually right.
+  const fallbackReturn = `https://rashica07.github.io/craftpanel-site/premium.html?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
+  const fallbackCancel = `https://rashica07.github.io/craftpanel-site/premium.html?checkout=cancelled`;
 
   // Embedded is the default — card entry and Link happen inline on the
   // site itself (Stripe's own iframe, so raw card data never touches
@@ -74,8 +85,8 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
     const session = await stripe.checkout.sessions.create({
       mode,
       line_items: lineItems,
-      success_url: body.successUrl || `${origin}/premium.html?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: body.cancelUrl || `${origin}/premium.html?checkout=cancelled`,
+      success_url: body.successUrl || fallbackReturn,
+      cancel_url: body.cancelUrl || fallbackCancel,
       metadata: { plan },
     });
     return json({ url: session.url });
@@ -85,7 +96,7 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
     ui_mode: "embedded",
     mode,
     line_items: lineItems,
-    return_url: body.returnUrl || `${origin}/premium.html?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    return_url: body.returnUrl || fallbackReturn,
     metadata: { plan },
   });
   return json({ clientSecret: session.client_secret });

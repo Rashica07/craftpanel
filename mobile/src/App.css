@@ -1,0 +1,289 @@
+/* Same palette as the desktop app's dark theme (src/index.css) — the
+   companion app should feel like the same product, not a different one. */
+:root {
+  --bg: #0d0c0f;
+  --surface: #151418;
+  --surface-2: #1c1b21;
+  --line: #2e2d36;
+  --ink: #f2f0ef;
+  --ink-dim: #b0adb6;
+  --ink-faint: #908d98;
+  --accent: #ff8c00;
+  --accent-hover: #ffa033;
+  --accent-press: #e07a00;
+  --ok: #46c46e;
+  --warn: #e8a33d;
+  --bad: #f4655c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar h1 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  flex-shrink: 0;
+}
+.dot.running {
+  background: var(--ok);
+}
+.dot.crashed {
+  background: var(--bad);
+}
+.dot.starting,
+.dot.stopping {
+  background: var(--warn);
+}
+
+.iconbtn {
+  background: transparent;
+  border: none;
+  color: var(--ink-faint);
+  font-size: 13px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.iconbtn:active {
+  color: var(--ink);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.server-row:active {
+  background: var(--surface-2);
+}
+
+.server-row .meta {
+  flex: 1;
+  min-width: 0;
+}
+.server-row .name {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.server-row .sub {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+
+.pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-faint);
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+.pill.running {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok);
+}
+.pill.crashed {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: var(--bad);
+}
+.pill.starting,
+.pill.stopping {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+
+button.action {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+button.action.primary {
+  background: var(--accent);
+  color: #1a1006;
+}
+button.action.primary:active {
+  background: var(--accent-press);
+}
+button.action.danger {
+  background: var(--surface-2);
+  color: var(--bad);
+  border: 1px solid var(--line);
+}
+button.action.ghost {
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+}
+button.action:disabled {
+  opacity: 0.5;
+}
+
+.empty {
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 13px;
+  padding: 48px 16px;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-bottom: 6px;
+}
+.field textarea,
+.field input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.field textarea {
+  resize: vertical;
+  min-height: 84px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.error-banner {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
+  color: var(--bad);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.brand .accent {
+  color: var(--accent);
+}
+
+.console {
+  background: #0a090c;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+  height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.consoleform {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.consoleform input {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.stat:last-child {
+  border-bottom: none;
+}
+.stat span:first-child {
+  color: var(--ink-faint);
+}
