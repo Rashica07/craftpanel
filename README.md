@@ -1,10 +1,10 @@
 <div align="center">
 
-# CraftPanel
+# OMNIServers
 
 **Run your own Minecraft server — without the config files, the terminal, or the port-forwarding headache.**
 
-A desktop app for macOS and Windows that creates, runs, and shares Minecraft servers.
+A desktop app for macOS, Windows, and Linux that creates, runs, and shares game servers.
 Pick a version, press Start, send your friends a link. That's it.
 
 [Download](#download) · [Features](#what-it-does) · [Roadmap](ROADMAP.md)
@@ -16,7 +16,7 @@ Pick a version, press Start, send your friends a link. That's it.
 ## What it does
 
 **Create a server in under a minute.**
-Choose Vanilla, Paper, Fabric, Forge or NeoForge and a Minecraft version — CraftPanel
+Choose Vanilla, Paper, Fabric, Forge or NeoForge and a Minecraft version — OMNIServers
 downloads the server, sets up the config, accepts the EULA, and first-boots it for you.
 Pick a seed, gamemode, difficulty and MOTD right in the wizard.
 
@@ -42,7 +42,7 @@ and automatic backups on stop. Close the window and it keeps running in the menu
 Optionally keep your computer awake so the server stays up while you're away.
 
 **Play together across computers.**
-Share a world with a friend using a private code. CraftPanel moves the world to your own
+Share a world with a friend using a private code. OMNIServers moves the world to your own
 Cloudflare R2 storage on stop and pulls the latest on start — whoever's playing holds the
 lock so you never overwrite each other.
 
@@ -50,22 +50,22 @@ lock so you never overwrite each other.
 
 ## Download
 
-Grab the latest installer from the [**Releases**](../../releases) page:
+The latest release is **3.1.1**. Download platform builds from the release pages:
 
-| Platform | File |
+| Platform | Latest build |
 | --- | --- |
-| **Windows 10 / 11** | `CraftPanel_*_x64-setup.exe` |
-| **macOS (Apple Silicon)** | `CraftPanel_*_aarch64.dmg` |
-| **macOS (Intel)** | `CraftPanel_*_x64.dmg` |
+| **Windows 10 / 11** | [OMNIServers for Windows 3.1.1](https://github.com/Rashica07/craftpanel/releases/tag/windows-v3.1.1) |
+| **macOS (Apple Silicon)** | [OMNIServers-3.1.1-AppleSilicon.dmg](https://github.com/Rashica07/craftpanel/releases/download/swift-v3.1.1/OMNIServers-3.1.1-AppleSilicon.dmg) |
+| **macOS (Intel)** | [OMNIServers-3.1.1-Intel.dmg](https://github.com/Rashica07/craftpanel/releases/download/swift-v3.1.1/OMNIServers-3.1.1-Intel.dmg) |
+| **Linux (x64 / ARM64)** | [OMNIServers for Linux 3.1.1](https://github.com/Rashica07/craftpanel/releases/tag/linux-v3.1.1) |
 
 ### First launch
 
-The app isn't code-signed yet, so your OS will warn you the first time:
+Platform builds have different signing status, so your OS may warn you the first time:
 
-- **Windows** — "Windows protected your PC" → **More info** → **Run anyway**.
-- **macOS** — right-click the app → **Open** → **Open**. If that doesn't work,
-  System Settings → Privacy & Security → **Open Anyway**, or run
-  `xattr -dr com.apple.quarantine /Applications/CraftPanel.app`.
+- **Windows** — the 3.1.1 build is unsigned; choose **More info** → **Run anyway** if SmartScreen appears.
+- **macOS** — the 3.1.1 DMGs are Apple Development signed but not notarized; right-click the app → **Open**. If needed, use System Settings → Privacy & Security → **Open Anyway**.
+- **Linux** — the 3.1.1 build is a test build; follow your desktop environment's normal application and firewall prompts.
 
 You'll also need **Java** installed to actually run a server (Temurin 17 or 21).
 
@@ -73,26 +73,29 @@ You'll also need **Java** installed to actually run a server (Temurin 17 or 21).
 
 ## How it works
 
-CraftPanel is a single native app — there's no background service, no Docker, no account.
+OMNIServers is a single native app — there's no background service, no Docker, no account.
 It launches the Minecraft server as a normal process on your machine and talks to it over
 RCON and its console. Your worlds and files stay on your disk; the only things that leave
 your computer are the version downloads (from Mojang / PaperMC / Modrinth), the optional
 tunnel traffic, and — if you turn on world sync — your world going to *your* Cloudflare
 storage.
 
-Built with [Tauri](https://tauri.app) (Rust) and React. Game-specific logic lives behind a
-single adapter, so other games can be added later.
+The current release includes native Swift support on macOS and Avalonia-based builds on
+Windows and Linux. Game-specific logic is shared behind a single adapter, so other games
+can be added later.
 
 ---
 
 ## Status
 
-CraftPanel is under active development. The core — create, run, configure, mod, back up,
+OMNIServers is under active development. The core — create, run, configure, mod, back up,
 expose, cross-play — works today. Some pieces are still maturing:
 
-- Installers aren't signed/notarised yet (see *First launch* above).
+- FiveM and Terraria servers can be detected, added, and started alongside Minecraft servers.
+- Java servers can receive a free tunnel address automatically, while local Join remains available.
+- Windows and Linux 3.1.1 artifacts are test/unsigned builds; FiveM still requires your own licence key.
 - World sync needs a one-time Cloudflare R2 token and hasn't been battle-tested.
-- The full Minecraft 1.21.9+ management API and a Bedrock *server* mode are planned.
+- Android local Minecraft/Paper hosting is not currently supported.
 
 See [ROADMAP.md](ROADMAP.md) for the whole picture.
 
@@ -109,14 +112,14 @@ cd src-tauri && cargo test # backend tests
 npm run build              # typecheck + bundle the frontend
 ```
 
-Requires Node 20+ and a stable Rust toolchain. Pushing a `v*` tag builds signed-off
-installers for macOS and Windows via GitHub Actions.
+Requires Node 20+ and a stable Rust toolchain. Release tags build platform artifacts via GitHub Actions; signing and notarization vary by
+platform and release.
 
 ---
 
 ## Ownership & Rights
 
-**CraftPanel is developed and owned by [kiqa-dev.it](https://kiqa-dev.it).**
+**OMNIServers is developed and owned by [kiqa-dev.it](https://kiqa-dev.it).**
 
 This application and all associated code are the exclusive property of kiqa-dev.it. The design, implementation, and intellectual property rights are held by kiqa-dev.it.
 
