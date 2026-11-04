@@ -103,17 +103,49 @@ See [ROADMAP.md](ROADMAP.md) for the whole picture.
 
 ## Building from source
 
-```bash
-npm install
-npm run tauri dev          # run the app
-npm run tauri build        # produce an installer for your platform
+OMNIServers uses native platform-specific applications:
 
-cd src-tauri && cargo test # backend tests
-npm run build              # typecheck + bundle the frontend
+- **macOS:** Swift
+- **Windows:** Avalonia / .NET
+- **Linux:** Avalonia / .NET
+
+### Requirements
+
+- macOS: Xcode and the Swift toolchain
+- Windows/Linux: .NET SDK compatible with the project
+
+### macOS
+
+Open the Swift project in Xcode, select the appropriate scheme, and build the application.
+
+Alternatively, use the command line:
+
+```bash
+xcodebuild -project <project>.xcodeproj -scheme <scheme> build
 ```
 
-Requires Node 20+ and a stable Rust toolchain. Release tags build platform artifacts via GitHub Actions; signing and notarization vary by
-platform and release.
+### Windows and Linux
+
+Build the Avalonia application using the .NET CLI:
+
+```bash
+dotnet restore
+dotnet build <project-or-solution>
+```
+
+### Tests
+
+Run the test projects using the .NET test runner:
+
+```bash
+dotnet test
+```
+
+### Releases
+
+Official builds and platform-specific release packages are distributed through GitHub Releases.
+
+For installation instructions, see the [Releases](../../releases) page.
 
 ---
 
